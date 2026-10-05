@@ -1,0 +1,12 @@
+---
+# Дополнения, которые Kubespray ставит вместе с кластером
+
+# Helm на control plane (пригодится на этапе с Helm-чартами)
+helm_enabled: true
+
+# Метрики для kubectl top и HPA
+metrics_server_enabled: true
+
+# Тома для Postgres: StorageClass local-path (данные лежат на диске ноды)
+local_path_provisioner_enabled: true
+

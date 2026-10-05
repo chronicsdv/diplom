@@ -1,0 +1,31 @@
+---
+# Лёгкая подготовка нод перед Kubespray: проверки и базовые пакеты.
+# Запуск: ansible-playbook -i inventory/hosts.ini prepare.yml
+- name: Подготовка нод
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Ждём, пока нода станет доступной по SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Проверяем, что оперативной памяти достаточно для Kubernetes
+      ansible.builtin.assert:
+        that: ansible_memtotal_mb >= 1700
+        fail_msg: "Мало памяти: {{ ansible_memtotal_mb }} МБ, Kubespray требует минимум 1700 МБ"
+        success_msg: "Память в порядке: {{ ansible_memtotal_mb }} МБ"
+
+    - name: Обновляем кэш apt
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Ставим базовые пакеты
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+          - htop
+        state: present

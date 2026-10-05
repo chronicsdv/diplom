@@ -1,0 +1,11 @@
+# .dockerignore в режиме БЕЛОГО СПИСКА: исключаем всё (*), разрешаем (!) только нужное.
+# Не попадут в образ: app.py.bak, db.create.py, test_app.py, README,
+# папка db/ (init.sql нужен только Postgres-контейнеру, он монтируется через compose).
+*
+
+!requirements.txt
+!app.py
+!config.json
+!products.json
+!templates
+!static

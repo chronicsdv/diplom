@@ -1,0 +1,144 @@
+# =====================================================================
+# docker-compose.yml — весь Craftista одной командой:
+#     docker compose up --build
+# Открывать: http://localhost:3000   (наружу открыт только frontend)
+#
+# Перед первым запуском:  cp .env.example .env   и задайте DB_PASSWORD в .env
+#
+# Хранение данных (всё в Docker-томах, переживает перезапуск контейнеров):
+#   catalogue-db-data — PostgreSQL каталога (таблица products)
+#   voting-data       — файл БД H2 с голосами
+# Полный сброс данных:  docker compose down -v
+# =====================================================================
+
+name: craftista
+
+# ---------------------------------------------------------------------
+# Общие настройки приложений (YAML-якорь). Подключаются строкой `<<: *common`.
+# ---------------------------------------------------------------------
+x-common: &common
+  restart: unless-stopped            # перезапуск при падении (кроме ручной остановки)
+  security_opt:
+    - no-new-privileges:true         # процессы не могут получить новые привилегии
+  cap_drop:
+    - ALL                            # убираем все Linux-capabilities — приложениям они не нужны
+  read_only: true                    # корневая ФС только для чтения
+  tmpfs:
+    - /tmp:size=64m                  # единственное место для временных файлов — в оперативной памяти
+  logging:                           # ротация логов, чтобы не раздувались
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  networks:
+    - craftista
+
+services:
+  # -------------------------------------------------------------------
+  # CATALOGUE-DB — PostgreSQL для каталога.
+  # Имя сервиса «catalogue-db» = DB_HOST, который получает catalogue.
+  # -------------------------------------------------------------------
+  catalogue-db:
+    image: postgres:16.4-alpine      # конкретная версия, не latest
+    restart: unless-stopped
+    environment:
+      # Значения берутся из файла .env (его создают из .env.example и НЕ коммитят в git).
+      # Конструкция ${VAR:?текст} — если переменная не задана, compose остановится с понятной ошибкой.
+      POSTGRES_DB: ${DB_NAME:-catalogue}
+      POSTGRES_USER: ${DB_USER:-devops}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Задайте DB_PASSWORD в файле .env (см. .env.example)}
+    volumes:
+      - catalogue-db-data:/var/lib/postgresql/data                               # данные БД (volume)
+      - ./catalogue/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro          # стартовое наполнение (1-й запуск)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]   # $$ — чтобы переменные раскрыл контейнер, а не compose
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - craftista
+    # Порт 5432 наружу не публикуем: базу видит только catalogue
+
+  # -------------------------------------------------------------------
+  # CATALOGUE — каталог (Flask). Работает с Postgres.
+  # -------------------------------------------------------------------
+  catalogue:
+    <<: *common
+    build:
+      context: ./catalogue
+    image: craftista/catalogue:${TAG:-dev}
+    environment:
+      # Переменные окружения важнее config.json (см. патч в catalogue/app.py)
+      DATA_SOURCE: db                         # режим «читать товары из Postgres»
+      DB_HOST: catalogue-db                   # имя сервиса БД в сети Docker
+      DB_NAME: ${DB_NAME:-catalogue}
+      DB_USER: ${DB_USER:-devops}
+      DB_PASSWORD: ${DB_PASSWORD:?Задайте DB_PASSWORD в файле .env (см. .env.example)}
+    depends_on:
+      catalogue-db:
+        condition: service_healthy   # стартуем, когда БД готова принимать подключения
+    mem_limit: 256m
+
+  # -------------------------------------------------------------------
+  # RECOMMENDATION — «оригами дня» (Go). Alias «recco» нужен, потому что
+  # frontend/config.json обращается к нему по имени http://recco:8080
+  # -------------------------------------------------------------------
+  recommendation:
+    <<: *common
+    build:
+      context: ./recommendation
+    image: craftista/recommendation:${TAG:-dev}
+    networks:
+      craftista:
+        aliases:
+          - recco
+    mem_limit: 128m
+
+  # -------------------------------------------------------------------
+  # VOTING — голосование (Spring Boot). H2 хранится в ФАЙЛЕ на томе,
+  # поэтому голоса сохраняются после перезапуска.
+  # -------------------------------------------------------------------
+  voting:
+    <<: *common
+    build:
+      context: ./voting
+    image: craftista/voting:${TAG:-dev}
+    environment:
+      # Перебивает spring.datasource.url из application.properties (in-memory → файл на томе)
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/data/votes
+      # Веб-консоль H2 (/h2-console) выключена
+      SPRING_H2_CONSOLE_ENABLED: "false"
+    volumes:
+      - voting-data:/data            # файл БД голосов (volume)
+    depends_on:
+      catalogue:
+        condition: service_healthy   # voting раз в минуту синхронизирует список из каталога
+    mem_limit: 768m
+
+  # -------------------------------------------------------------------
+  # FRONTEND — единственная точка входа для пользователя
+  # -------------------------------------------------------------------
+  frontend:
+    <<: *common
+    build:
+      context: ./frontend
+    image: craftista/frontend:${TAG:-dev}
+    ports:
+      - "3000:3000"                  # http://localhost:3000 (для порта 80 — "80:3000")
+    depends_on:
+      catalogue:
+        condition: service_healthy
+      recommendation:
+        condition: service_healthy
+      voting:
+        condition: service_healthy
+    mem_limit: 256m
+
+volumes:
+  catalogue-db-data:
+  voting-data:
+
+networks:
+  craftista:
+    driver: bridge

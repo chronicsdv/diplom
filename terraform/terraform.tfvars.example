@@ -1,0 +1,9 @@
+# cp terraform.tfvars.example terraform.tfvars  и подставьте свой IP
+allowed_ssh_cidrs = ["203.0.113.10/32"]   # узнать свой: curl ifconfig.me
+
+# На защите (3 control plane):
+# control_plane_count = 3
+
+# На защите отключаем прерываемость:
+# cp_preemptible     = false
+# worker_preemptible = false

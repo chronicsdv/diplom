@@ -1,0 +1,31 @@
+# .dockerignore — что НЕ отправлять в сборку
+
+# Результат локальной сборки Maven (в образе собираем заново)
+target
+
+# Maven wrapper не используем (Maven есть в образе сборки)
+mvnw
+mvnw.cmd
+.mvn
+
+# Мусор из репозитория и документация
+pom.xml.orig
+HELP.md
+README.md
+
+# IDE и Git
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+.DS_Store
+
+# Секреты
+.env
+.env.*
+
+# Сами файлы сборки
+Dockerfile*
+.dockerignore
+docker-compose*.yml

@@ -1,0 +1,10 @@
+---
+# Наши переопределения для Kubespray. Всё остальное — значения по умолчанию.
+
+# Сетевой плагин (в Kubespray по умолчанию и так calico, указано явно для наглядности)
+kube_network_plugin: calico
+
+# Забрать admin.conf на локальную машину: ansible/inventory/artifacts/admin.conf
+kubeconfig_localhost: true
+kubectl_localhost: false
+

@@ -1,0 +1,31 @@
+# Файл создан Terraform автоматически. Руками не править.
+[all]
+%{ for n in control_planes ~}
+${n.name} ansible_host=${n.public_ip} ip=${n.private_ip} etcd_member_name=${n.name}
+%{ endfor ~}
+%{ for n in workers ~}
+${n.name} ansible_host=${n.public_ip} ip=${n.private_ip}
+%{ endfor ~}
+
+[all:vars]
+ansible_user=${ssh_user}
+ansible_ssh_private_key_file=${ssh_private_key}
+
+[kube_control_plane]
+%{ for n in control_planes ~}
+${n.name}
+%{ endfor ~}
+
+[etcd]
+%{ for n in control_planes ~}
+${n.name}
+%{ endfor ~}
+
+[kube_node]
+%{ for n in workers ~}
+${n.name}
+%{ endfor ~}
+
+[k8s_cluster:children]
+kube_control_plane
+kube_node

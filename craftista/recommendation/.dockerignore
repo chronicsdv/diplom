@@ -1,0 +1,12 @@
+# .dockerignore в режиме БЕЛОГО СПИСКА: исключаем всё (*), разрешаем (!) только нужное.
+# Не попадут в образ: tests/, README, .gitignore и любой локально собранный бинарь.
+*
+
+!go.mod
+!go.sum
+!main.go
+!api
+!data
+!config.json
+!templates
+!static
