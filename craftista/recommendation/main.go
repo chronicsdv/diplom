@@ -1,41 +1,39 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/gin-gonic/gin"
-        "recommendation/api"
-	"net/http"
-	"time"
-        "encoding/json"
 	"net"
-        "os"
+	"net/http"
+	"os"
+	"recommendation/api"
+	"time"
 )
-
 
 // Config represents the structure of our configuration file.
 type Config struct {
-    Version string `json:"version"`
+	Version string `json:"version"`
 }
 
 // loadConfig reads the configuration file and returns a Config struct.
 func loadConfig() (Config, error) {
-    file, err := os.Open("config.json")
-    if err != nil {
-        return Config{}, err
-    }
-    defer file.Close()
+	file, err := os.Open("config.json")
+	if err != nil {
+		return Config{}, err
+	}
+	defer file.Close()
 
-    config := Config{}
-    decoder := json.NewDecoder(file)
-    err = decoder.Decode(&config)
-    return config, err
+	config := Config{}
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	return config, err
 }
 
-
 type SystemInfo struct {
-	Hostname      string
-	IPAddress     string
-	IsContainer   bool
-	IsKubernetes  bool
+	Hostname     string
+	IPAddress    string
+	IsContainer  bool
+	IsKubernetes bool
 }
 
 func GetSystemInfo() SystemInfo {
@@ -57,9 +55,9 @@ func GetSystemInfo() SystemInfo {
 	isKubernetes := false
 
 	return SystemInfo{
-		Hostname:      hostname,
-		IPAddress:     ip,
-		IsContainer:   isContainer,
+		Hostname:     hostname,
+		IPAddress:    ip,
+		IsContainer:  isContainer,
 		IsKubernetes: isKubernetes,
 	}
 }
@@ -74,13 +72,12 @@ func getRecommendationStatus(c *gin.Context) {
 	// - External API/service availability
 	// - Disk space, memory usage, etc.
 
-	status := "operational"  // or "down", "maintenance", etc.
+	status := "operational" // or "down", "maintenance", etc.
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": status,
 	})
 }
-
 
 func renderHomePage(c *gin.Context) {
 	config, err := loadConfig()
@@ -88,20 +85,19 @@ func renderHomePage(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
-    
+
 	systemInfo := GetSystemInfo()
 
 	c.HTML(http.StatusOK, "index.html", gin.H{
-		"Year":        time.Now().Year(),
-		"Version":     config.Version,
-		"SystemInfo":  systemInfo,
+		"Year":       time.Now().Year(),
+		"Version":    config.Version,
+		"SystemInfo": systemInfo,
 	})
 }
 
-
 func main() {
 	router := gin.Default()
-		
+
 	// Load HTML files
 	router.LoadHTMLGlob("templates/*")
 
@@ -113,14 +109,11 @@ func main() {
 
 	// Handle requests to the /origami-of-the-day endpoint with the GetOrigamiOfTheDay function from the api package
 	router.GET("/api/origami-of-the-day", api.GetOrigamiOfTheDay)
-        
-	// Service Status Page
-        router.GET("/api/recommendation-status", getRecommendationStatus)
 
+	// Service Status Page
+	router.GET("/api/recommendation-status", getRecommendationStatus)
 
 	// Start the server on port 8080
 	router.Run(":8080")
 
 }
-
-

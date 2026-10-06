@@ -1,0 +1,35 @@
+# Применение:  kubectl apply -k k8s/
+# Смена версии образов (так будет делать CI):
+#   cd k8s && kustomize edit set image ghcr.io/chronicsdv/craftista-frontend=ghcr.io/chronicsdv/craftista-frontend:<тег>
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: craftista
+
+resources:
+  - namespace.yaml
+  - postgres/service.yaml
+  - postgres/statefulset.yaml
+  - catalogue.yaml
+  - recommendation.yaml
+  - voting.yaml
+  - frontend.yaml
+  - ingress.yaml
+
+# init.sql превращается в ConfigMap (копия файла catalogue/db/init.sql, см. README)
+configMapGenerator:
+  - name: catalogue-db-init
+    files:
+      - postgres/init.sql
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: ghcr.io/chronicsdv/craftista-catalogue
+    newTag: v0.1.0
+  - name: ghcr.io/chronicsdv/craftista-recommendation
+    newTag: v0.1.0
+  - name: ghcr.io/chronicsdv/craftista-voting
+    newTag: v0.1.0
+  - name: ghcr.io/chronicsdv/craftista-frontend
+    newTag: v0.1.0

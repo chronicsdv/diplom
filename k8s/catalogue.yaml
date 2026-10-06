@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogue
+  labels:
+    app.kubernetes.io/name: catalogue
+    app.kubernetes.io/part-of: craftista
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: catalogue
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: catalogue
+        app.kubernetes.io/part-of: craftista
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: catalogue
+          image: ghcr.io/chronicsdv/craftista-catalogue
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: DATA_SOURCE
+              value: db                  # читать товары из PostgreSQL
+            - name: DB_HOST
+              value: catalogue-db
+            - name: DB_NAME
+              valueFrom: { secretKeyRef: { name: craftista-db, key: DB_NAME } }
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: craftista-db, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: craftista-db, key: DB_PASSWORD } }
+          readinessProbe:
+            httpGet: { path: /api/products, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /api/products, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue            # это имя зашито в frontend и voting (http://catalogue:5000)
+  labels:
+    app.kubernetes.io/name: catalogue
+    app.kubernetes.io/part-of: craftista
+spec:
+  selector:
+    app.kubernetes.io/name: catalogue
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http

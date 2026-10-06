@@ -1,0 +1,17 @@
+# Headless-сервис (clusterIP: None): нужен StatefulSet'у, а имя catalogue-db
+# совпадает с DB_HOST, который получает catalogue.
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue-db
+  labels:
+    app.kubernetes.io/name: catalogue-db
+    app.kubernetes.io/part-of: craftista
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: catalogue-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

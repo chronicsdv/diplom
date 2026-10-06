@@ -8,3 +8,4 @@ kube_network_plugin: calico
 kubeconfig_localhost: true
 kubectl_localhost: false
 
+
