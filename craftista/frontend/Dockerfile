@@ -11,12 +11,13 @@
 # Версия Node вынесена в ARG: можно сменить при сборке
 #   docker build --build-arg NODE_VERSION=24 ...
 ARG NODE_VERSION=22
+ARG ALPINE_VERSION=3.22
 
 # ---------------------------------------------------------------------
 # ЭТАП 1: deps — устанавливаем только production-зависимости
 # ---------------------------------------------------------------------
 # alpine — маленький базовый образ (~50 МБ вместо ~400 МБ у debian-вариантов)
-FROM node:${NODE_VERSION}-alpine AS deps
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS deps
 WORKDIR /app
 
 # Сначала копируем ТОЛЬКО манифесты зависимостей. Пока package.json не менялся,
@@ -40,7 +41,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # ---------------------------------------------------------------------
 # ЭТАП 2: runtime — итоговый образ, который реально запускается
 # ---------------------------------------------------------------------
-FROM node:${NODE_VERSION}-alpine AS runtime
+FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS runtime
 
 # OCI-метки: кто собрал, откуда исходники (видно в `docker inspect`, реестрах и сканерах)
 LABEL org.opencontainers.image.title="craftista-frontend" \
@@ -51,7 +52,7 @@ LABEL org.opencontainers.image.title="craftista-frontend" \
 # tini — крошечный «init»-процесс. Когда Node запущен как PID 1, он не умеет
 # корректно обрабатывать сигналы и «подбирать» зомби-процессы. tini решает это,
 # поэтому `docker stop` останавливает контейнер мгновенно, а не через 10 секунд.
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini=0.19.0-r3
 
 # NODE_ENV=production — Express и библиотеки включают оптимизации (кеш шаблонов и т.д.)
 # PORT — app.js читает process.env.PORT (по умолчанию 3000)

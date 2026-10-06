@@ -30,6 +30,7 @@ WORKDIR /build
 COPY requirements.txt ./
 # Кеш pip живёт между сборками, но не раздувает образ.
 # В requirements.txt уже есть: Flask, gunicorn, requests, flask_cors, psycopg2-binary.
+# hadolint ignore=DL3042
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 

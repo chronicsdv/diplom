@@ -36,9 +36,8 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 # Разбираем «толстый» jar на слои (Spring Boot ≥ 2.3 умеет это «из коробки»).
 # Появятся папки: dependencies, spring-boot-loader, snapshot-dependencies, application.
-RUN mkdir /layers \
- && cd /layers \
- && java -Djarmode=layertools -jar /build/target/*.jar extract
+WORKDIR /layers
+RUN java -Djarmode=layertools -jar /build/target/*.jar extract
 
 # ---------------------------------------------------------------------
 # ЭТАП 2: runtime — только JRE (без Maven, компилятора и исходников)
