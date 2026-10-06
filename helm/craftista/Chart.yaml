@@ -1,0 +1,6 @@
+apiVersion: v2
+name: craftista
+description: Helm-чарт приложения Craftista (frontend, catalogue, recommendation, voting + PostgreSQL)
+type: application
+version: 0.1.0        # версия самого чарта (меняется при изменении шаблонов)
+appVersion: "0.1.0"   # версия приложения

@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogue
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "catalogue") | nindent 4 }}
+spec:
+  replicas: {{ .Values.catalogue.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "craftista.selectorLabels" (dict "root" . "name" "catalogue") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "craftista.labels" (dict "root" . "name" "catalogue") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: catalogue
+          image: {{ include "craftista.image" (dict "root" . "svc" .Values.catalogue) | quote }}
+          imagePullPolicy: {{ .Values.catalogue.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: DATA_SOURCE
+              value: db
+            - name: DB_HOST
+              value: catalogue-db
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "craftista.dbSecretName" . }}
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "craftista.dbSecretName" . }}
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "craftista.dbSecretName" . }}
+                  key: DB_PASSWORD
+          readinessProbe:
+            httpGet: { path: /api/products, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /api/products, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.catalogue.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "catalogue") | nindent 4 }}
+spec:
+  selector:
+    {{- include "craftista.selectorLabels" (dict "root" . "name" "catalogue") | nindent 4 }}
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http

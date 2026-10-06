@@ -1,0 +1,83 @@
+# Значения по умолчанию для чарта Craftista.
+# Любое значение переопределяется через --set или -f my-values.yaml.
+
+global:
+  # Тег образов по умолчанию для всех сервисов. CI/CD подставляет сюда sha-<коммит>.
+  imageTag: v0.1.0
+
+# Если образы приватные: список секретов для скачивания, например [{name: ghcr-pull}]
+imagePullSecrets: []
+
+# ---------- PostgreSQL (данные каталога) ----------
+database:
+  image:
+    repository: postgres
+    tag: 16.4-alpine
+    pullPolicy: IfNotPresent
+  # Секрет с ключами DB_NAME, DB_USER, DB_PASSWORD. По умолчанию создаётся вручную
+  # (пароль не хранится в git), см. helm/craftista/README.md
+  existingSecret: craftista-db
+  # Только для быстрых тестов: создать секрет самим чартом из значений ниже
+  createSecret: false
+  name: catalogue
+  user: devops
+  password: ""
+  persistence:
+    size: 2Gi
+    storageClass: local-path
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# ---------- Сервисы приложения ----------
+frontend:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/chronicsdv/craftista-frontend
+    tag: ""              # пусто = global.imageTag
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 256Mi }
+
+catalogue:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/chronicsdv/craftista-catalogue
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 256Mi }
+
+recommendation:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/chronicsdv/craftista-recommendation
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+voting:
+  replicaCount: 1        # файловая H2-база: больше одной реплики нельзя
+  image:
+    repository: ghcr.io/chronicsdv/craftista-voting
+    tag: ""
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true        # false = голоса хранятся в emptyDir и пропадают при перезапуске
+    size: 1Gi
+    storageClass: local-path
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 768Mi }
+
+# ---------- Вход в приложение ----------
+ingress:
+  enabled: true
+  className: traefik
+  host: ""               # пусто = открывается по IP любого воркера; позже сюда домен
+  annotations: {}
+  tls: []                # пример: [{secretName: craftista-tls, hosts: [craftista.example.com]}]

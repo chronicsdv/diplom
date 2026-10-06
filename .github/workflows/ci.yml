@@ -116,14 +116,29 @@ jobs:
         run: mvn -B -ntp verify
 
   # ---------- Инфраструктура и манифесты ----------
-  manifests:
-    name: Kubernetes-манифесты
-    runs-on: ubuntu-24.04
+  helm:
+    name: Helm-чарт (lint + template + kubeconform)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Валидация (kustomize + kubeconform)
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: helm lint
+        run: helm lint helm/craftista --strict
+
+      - name: Рендер со значениями по умолчанию + kubeconform
         run: |
-          kubectl kustomize k8s \
+          helm template craftista helm/craftista --namespace craftista \
+            | docker run -i --rm ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas -
+
+      - name: Рендер с созданием секрета + kubeconform
+        run: |
+          helm template craftista helm/craftista --namespace craftista \
+            --set database.createSecret=true \
+            --set database.password=ci-test \
             | docker run -i --rm ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas -
 
   terraform:

@@ -1,0 +1,107 @@
+{{- if .Values.voting.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: voting-data
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "voting") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.voting.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.voting.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voting
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "voting") | nindent 4 }}
+spec:
+  replicas: {{ .Values.voting.replicaCount }}
+  strategy:
+    type: Recreate           # том ReadWriteOnce нельзя подключить к двум подам одновременно
+  selector:
+    matchLabels:
+      {{- include "craftista.selectorLabels" (dict "root" . "name" "voting") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "craftista.labels" (dict "root" . "name" "voting") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: voting
+          image: {{ include "craftista.image" (dict "root" . "svc" .Values.voting) | quote }}
+          imagePullPolicy: {{ .Values.voting.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:h2:file:/data/votes
+            - name: SPRING_H2_CONSOLE_ENABLED
+              value: "false"
+          startupProbe:
+            httpGet: { path: /api/origamis, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /api/origamis, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /api/origamis, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.voting.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          {{- if .Values.voting.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: voting-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voting
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "voting") | nindent 4 }}
+spec:
+  selector:
+    {{- include "craftista.selectorLabels" (dict "root" . "name" "voting") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

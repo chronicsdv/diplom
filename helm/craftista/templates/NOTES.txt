@@ -1,0 +1,8 @@
+Craftista установлена: релиз {{ .Release.Name }}, namespace {{ .Release.Namespace }}.
+
+Проверка:
+  kubectl -n {{ .Release.Namespace }} get pods
+{{- if .Values.ingress.enabled }}
+
+Сайт: http://<публичный IP любого воркера>/{{ with .Values.ingress.host }}  (host: {{ . }}){{ end }}
+{{- end }}

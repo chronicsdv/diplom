@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalogue-db-init
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "catalogue-db") | nindent 4 }}
+data:
+  init.sql: |
+{{ .Files.Get "files/init.sql" | indent 4 }}

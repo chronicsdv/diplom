@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendation
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "recommendation") | nindent 4 }}
+spec:
+  replicas: {{ .Values.recommendation.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "craftista.selectorLabels" (dict "root" . "name" "recommendation") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "craftista.labels" (dict "root" . "name" "recommendation") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: recommendation
+          image: {{ include "craftista.image" (dict "root" . "svc" .Values.recommendation) | quote }}
+          imagePullPolicy: {{ .Values.recommendation.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /api/recommendation-status, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /api/recommendation-status, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.recommendation.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Имя recco зашито во frontend (http://recco:8080), поэтому Service называется не recommendation
+  name: recco
+  labels:
+    {{- include "craftista.labels" (dict "root" . "name" "recommendation") | nindent 4 }}
+spec:
+  selector:
+    {{- include "craftista.selectorLabels" (dict "root" . "name" "recommendation") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
