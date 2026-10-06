@@ -18,7 +18,7 @@ jobs:
   # ---------- Проверка Dockerfile'ов ----------
   lint-dockerfiles:
     name: Lint Dockerfile (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
   # ---------- catalogue (Python / Flask) ----------
   catalogue:
     name: catalogue (lint + test)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: craftista/catalogue
@@ -56,7 +56,7 @@ jobs:
   # ---------- frontend (Node.js) ----------
   frontend:
     name: frontend (lint + test)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: craftista/frontend
@@ -75,7 +75,7 @@ jobs:
   # ---------- recommendation (Go) ----------
   recommendation:
     name: recommendation (lint + test)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: craftista/recommendation
@@ -101,13 +101,13 @@ jobs:
   # ---------- voting (Java / Spring Boot) ----------
   voting:
     name: voting (build + test)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: craftista/voting
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -118,7 +118,7 @@ jobs:
   # ---------- Инфраструктура и манифесты ----------
   manifests:
     name: Kubernetes-манифесты
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Валидация (kustomize + kubeconform)
@@ -128,7 +128,7 @@ jobs:
 
   terraform:
     name: Terraform (fmt + validate)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: terraform
@@ -149,7 +149,7 @@ jobs:
   # ---------- Сборка и загрузка образов ----------
   build-and-push:
     name: Образ ${{ matrix.service }} -> ghcr.io
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting]
     permissions:
       contents: read

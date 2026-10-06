@@ -78,11 +78,11 @@ describe('App', () => {
     });
 
     describe("GET /", () => {
-        it("should display the service status section", (done) => {
+        it("should display the backend services section", (done) => {
             chai.request(server)
                 .get("/")
                 .end((err, response) => {
-                    response.text.should.include("Service Status");
+                    response.text.should.include("Backend Services");
                     done();
                 });
         });
