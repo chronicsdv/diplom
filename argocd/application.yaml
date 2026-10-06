@@ -1,0 +1,45 @@
+# Приложение Argo CD: следит за чартом helm/craftista в ветке main и держит кластер в соответствии с git.
+# Применяется один раз вручную:  kubectl apply -f argocd/application.yaml
+#
+# ВАЖНО: имя приложения = craftista = имя Helm-релиза. Argo ставит на ресурсы метку
+# app.kubernetes.io/instance=<имя приложения>, и она должна совпадать с той, что в нашем чарте.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: craftista
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chronicsdv/diplom.git
+    targetRevision: main
+    path: helm/craftista
+    helm:
+      releaseName: craftista
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: craftista
+  syncPolicy:
+    automated:
+      prune: true        # удалять из кластера то, чего больше нет в git
+      selfHeal: true     # возвращать ручные правки в кластере к состоянию из git
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
+  # StatefulSet с volumeClaimTemplates у Argo часто вечно OutOfSync из-за полей, которые
+  # Kubernetes дописывает сам. Игнорируем только их.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
+        - .spec.volumeClaimTemplates[]?.status
