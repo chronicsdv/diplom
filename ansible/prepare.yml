@@ -11,6 +11,10 @@
       ansible.builtin.wait_for_connection:
         timeout: 300
 
+    - name: Имя хоста = имя из инвентаря (клоны шаблона называются одинаково)
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
     - name: Проверяем, что оперативной памяти достаточно для Kubernetes
       ansible.builtin.assert:
         that: ansible_memtotal_mb >= 1700

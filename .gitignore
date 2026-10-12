@@ -16,3 +16,7 @@ ansible/inventory/artifacts/
 *.key
 kubeconfig*
 admin.conf
+terraform-hyperv/.terraform/
+terraform-hyperv/*.tfstate
+terraform-hyperv/*.tfstate.*
+terraform-hyperv/crash.log
