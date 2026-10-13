@@ -1,0 +1,66 @@
+# kube-prometheus-stack: Prometheus + Grafana + Alertmanager + exporters
+
+# В кластере Kubespray эти компоненты слушают метрики только на localhost,
+# поэтому цели недоступны и дают ложные алерты TargetDown. Отключаем.
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 3d
+    retentionSize: 3GB
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+      limits: { memory: 1Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+    # подхватывать ServiceMonitor/PodMonitor/правила из любых релизов (понадобится для Traefik и приложения)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+grafana:
+  defaultDashboardsTimezone: browser
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+alertmanager:
+  alertmanagerSpec:
+    secrets:
+      - alertmanager-telegram        # токен бота монтируется в Alertmanager как файл
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: telegram
+      group_by: [alertname, namespace]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+    receivers:
+      - name: "null"
+      - name: telegram
+        telegram_configs:
+          - bot_token_file: /etc/alertmanager/secrets/alertmanager-telegram/token
+            chat_id: ${TELEGRAM_CHAT_ID}
+            send_resolved: true

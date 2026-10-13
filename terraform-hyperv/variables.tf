@@ -80,5 +80,5 @@ variable "worker_cores" {
 
 variable "worker_memory_gb" {
   type    = number
-  default = 4
+  default = 5
 }

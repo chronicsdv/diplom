@@ -1,0 +1,65 @@
+# Logstash: принимает логи от Filebeat (порт 5044) и пишет в Elasticsearch.
+# Переменные LOGS_ES_* создаёт ECK по elasticsearchRefs (clusterName: logs).
+apiVersion: logstash.k8s.elastic.co/v1alpha1
+kind: Logstash
+metadata:
+  name: logstash
+  namespace: logging
+spec:
+  version: 8.19.0
+  count: 1
+  elasticsearchRefs:
+    - clusterName: logs
+      name: logs
+  config:
+    pipeline.workers: 1
+  pipelines:
+    - pipeline.id: main
+      config.string: |
+        input {
+          beats {
+            port => 5044
+          }
+        }
+        output {
+          elasticsearch {
+            hosts => [ "${LOGS_ES_HOSTS}" ]
+            user => "${LOGS_ES_USER}"
+            password => "${LOGS_ES_PASSWORD}"
+            ssl_certificate_authorities => "${LOGS_ES_SSL_CERTIFICATE_AUTHORITY}"
+            index => "logstash-%{+YYYY.MM.dd}"
+            data_stream => "false"
+          }
+        }
+  services:
+    - name: beats
+      service:
+        spec:
+          type: ClusterIP
+          ports:
+            - port: 5044
+              name: filebeat
+              protocol: TCP
+              targetPort: 5044
+  podTemplate:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    elasticsearch.k8s.elastic.co/cluster-name: logs
+      containers:
+        - name: logstash
+          env:
+            - name: LS_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 768Mi
+            limits:
+              memory: 1280Mi

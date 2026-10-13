@@ -17,7 +17,7 @@ log()  { printf '\n\033[1;34m>>> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m!!! %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
-trap 'rm -f "$TF_DIR/tfplan"' EXIT
+trap 'rm -f "$TF_DIR/tfplan" "$TF_DIR/tfstart"' EXIT
 
 # ---------- проверки ----------
 for cmd in terraform kubectl python3 powershell.exe iconv base64; do
@@ -47,29 +47,25 @@ VM_NAMES="$(printf '%s\n' "$NODES" | awk '{print $1}' | paste -sd, -)"
 export VM_NAMES
 export WSLENV="${WSLENV:+$WSLENV:}TF_VAR_hyperv_password:TF_VAR_hyperv_user:VM_NAMES"
 
-# ---------- 1. запуск ВМ через WinRM ----------
+# ---------- 1. запуск ВМ через провайдер Terraform (тот же вход, что в plan/apply) ----------
 log "Запускаю ВМ: ${VM_NAMES//,/ }"
-
-PS_SCRIPT="$(cat <<'PS'
-$ErrorActionPreference = 'Stop'
-$pw   = ConvertTo-SecureString $env:TF_VAR_hyperv_password -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential($env:TF_VAR_hyperv_user, $pw)
-$opt  = New-PSSessionOption -SkipCACheck -SkipCNCheck
-$names = $env:VM_NAMES -split ','
-Invoke-Command -ComputerName localhost -UseSSL -Credential $cred -Authentication Negotiate -SessionOption $opt -ArgumentList (,$names) -ScriptBlock {
-  param($names)
-  foreach ($n in $names) {
-    $vm = Get-VM -Name $n -ErrorAction SilentlyContinue
-    if (-not $vm) { "  ${n}: VM not found"; continue }
-    if ($vm.State -eq 'Running') { "  ${n}: already running" }
-    else { Start-VM -Name $n | Out-Null; "  ${n}: started" }
-  }
-}
-PS
-)"
-PS_B64="$(printf '%s' "$PS_SCRIPT" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)"
-powershell.exe -NoProfile -NonInteractive -EncodedCommand "$PS_B64" | tr -d '\r' \
-  || die "Не удалось запустить ВМ. Проверьте WinRM (порт 5986) и пароль $HYPERV_USER"
+terraform -chdir="$TF_DIR" init -input=false >/dev/null
+terraform -chdir="$TF_DIR" plan -input=false -out=tfstart \
+  -target=hyperv_machine_instance.control_plane \
+  -target=hyperv_machine_instance.worker \
+  || die "Не удалось построить план запуска ВМ"
+# ВМ и диски пересоздавать/удалять нельзя
+terraform -chdir="$TF_DIR" show -json tfstart | python3 -c '
+import json, sys
+plan = json.load(sys.stdin)
+bad = [c["address"] for c in plan.get("resource_changes", [])
+       if "delete" in c["change"]["actions"]]
+if bad:
+    print("ОСТАНОВКА: план удаляет или пересоздаёт ресурсы: " + ", ".join(bad))
+    sys.exit(1)
+' || die "План запуска опасен, ничего не применено. Проверьте вывод plan выше."
+terraform -chdir="$TF_DIR" apply -input=false tfstart \
+  || die "Не удалось запустить ВМ через Terraform"
 
 # ---------- 2. ждём SSH на всех нодах ----------
 log "Жду SSH на нодах (до 5 минут на каждую)"

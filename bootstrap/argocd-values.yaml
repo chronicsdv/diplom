@@ -1,0 +1,10 @@
+dex:
+  enabled: false
+configs:
+  cm:
+    # У нас нет LoadBalancer, поэтому Ingress никогда не получает адрес.
+    # Без этого правила Argo CD навсегда показывает Ingress как Progressing.
+    resource.customizations.health.networking.k8s.io_Ingress: |
+      hs = {}
+      hs.status = "Healthy"
+      return hs

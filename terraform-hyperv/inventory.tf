@@ -4,13 +4,13 @@ locals {
   # Hyper-V отдаёт и IPv4, и IPv6: берём только IPv4
   control_planes = [for i in hyperv_machine_instance.control_plane : {
     name       = i.name
-    public_ip  = [for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0]
-    private_ip = [for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0]
+    public_ip  = try([for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0], null)
+    private_ip = try([for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0], null)
   }]
   workers = [for i in hyperv_machine_instance.worker : {
     name       = i.name
-    public_ip  = [for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0]
-    private_ip = [for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0]
+    public_ip  = try([for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0], null)
+    private_ip = try([for ip in i.network_adaptors[0].ip_addresses : ip if can(regex(local.ipv4_re, ip))][0], null)
   }]
 }
 
@@ -28,6 +28,14 @@ resource "local_file" "ansible_inventory" {
 # IP control plane в сертификат API-сервера
 resource "local_file" "kubespray_api_cert" {
   filename = "${path.module}/../ansible/inventory/group_vars/k8s_cluster/api-cert.yml"
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for n in local.control_planes : n.public_ip != null])
+      error_message = "У control plane ещё нет IPv4-адреса (ВМ выключена или Hyper-V не отдал IP)."
+    }
+  }
+
   content = yamlencode({
     supplementary_addresses_in_ssl_keys = [for n in local.control_planes : n.public_ip]
   })
