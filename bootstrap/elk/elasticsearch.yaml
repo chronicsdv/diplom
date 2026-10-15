@@ -1,4 +1,4 @@
-# Elasticsearch на одном узле (ECK). Heap 1 ГБ, лимит памяти пода 2 ГБ.
+# Elasticsearch на одном узле (ECK). Heap 768 МБ, лимит памяти пода 1,5 ГБ.
 # Требует vm.max_map_count=262144 на нодах (см. README и ansible/prepare.yml).
 apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
@@ -18,13 +18,13 @@ spec:
             - name: elasticsearch
               env:
                 - name: ES_JAVA_OPTS
-                  value: "-Xms1g -Xmx1g"
+                  value: "-Xms768m -Xmx768m"
               resources:
                 requests:
                   cpu: 250m
-                  memory: 2Gi
+                  memory: 1536Mi
                 limits:
-                  memory: 2Gi
+                  memory: 1536Mi
       volumeClaimTemplates:
         - metadata:
             name: elasticsearch-data

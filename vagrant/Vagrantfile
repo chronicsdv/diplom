@@ -1,0 +1,46 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Craftista: 1 control plane + 3 workers на Hyper-V.
+# IP выдаёт роутер по зарезервированным MAC (Vagrant не умеет статику на Hyper-V).
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "gusztavvargadr/ubuntu-server-2404-lts"
+  config.vm.box_check_update = false
+
+  # без SMB-шары (иначе Hyper-V спрашивает пароль Windows)
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  # публичный ключ лежит рядом с Vagrantfile (craftista.pub)
+  pubkey = File.read(File.join(__dir__, "craftista.pub")).strip
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+    mkdir -p /home/vagrant/.ssh
+    grep -qxF "#{pubkey}" /home/vagrant/.ssh/authorized_keys 2>/dev/null || echo "#{pubkey}" >> /home/vagrant/.ssh/authorized_keys
+    chown -R vagrant:vagrant /home/vagrant/.ssh
+    chmod 700 /home/vagrant/.ssh && chmod 600 /home/vagrant/.ssh/authorized_keys
+  SHELL
+
+  nodes = {
+    "craftista-cp" => { mac: "00155D0A0101", mem: 5120 },  # 192.168.0.105
+    "craftista-w1" => { mac: "00155D0A0201", mem: 4096 },  # 192.168.0.103
+    "craftista-w2" => { mac: "00155D0A0202", mem: 5120 },  # 192.168.0.104
+    "craftista-w3" => { mac: "00155D0A0203", mem: 5120 },  # 192.168.0.102
+  }
+
+  nodes.each do |name, cfg|
+    config.vm.define name do |node|
+      node.vm.hostname = name
+      node.vm.network "public_network", bridge: "k8s-external"
+
+      node.vm.provider "hyperv" do |h|
+        h.vmname = name
+        h.memory = cfg[:mem]   # maxmemory НЕ задаём: он включает динамическую память
+        h.cpus = 2
+        h.mac = cfg[:mac]
+        h.linked_clone = true
+        h.enable_virtualization_extensions = false
+      end
+    end
+  end
+end
