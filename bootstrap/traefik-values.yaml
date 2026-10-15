@@ -1,0 +1,10 @@
+# Traefik на каждом воркере слушает 80/443 прямо на ноде (hostPort), снаружи кластера отдельный балансировщик не нужен.
+deployment:
+  kind: DaemonSet
+ports:
+  web:
+    hostPort: 80
+  websecure:
+    hostPort: 443
+service:
+  type: ClusterIP

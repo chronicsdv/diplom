@@ -15,6 +15,17 @@
       ansible.builtin.hostname:
         name: "{{ inventory_hostname }}"
 
+    - name: vm.max_map_count для Elasticsearch
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-elasticsearch.conf
+        content: "vm.max_map_count=262144\n"
+        mode: "0644"
+      register: es_sysctl
+
+    - name: Применяем sysctl сразу
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/99-elasticsearch.conf
+      when: es_sysctl.changed
+
     - name: Проверяем, что оперативной памяти достаточно для Kubernetes
       ansible.builtin.assert:
         that: ansible_memtotal_mb >= 1700
