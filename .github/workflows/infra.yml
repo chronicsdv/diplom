@@ -1,0 +1,84 @@
+name: infra
+
+# Если кластера нет — поднимает его с нуля (./up.sh).
+# Если кластер уже есть — применяет только те компоненты стека, файлы которых изменились
+# (ONLY=... ./up.sh stack). Ручной запуск применяет весь стек.
+# Работает на self-hosted раннере в WSL (Ubuntu от администратора, ./run.sh запущен).
+# Приложение деплоит Argo CD по GitOps, этот workflow его не трогает.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ansible/**"
+      - "bootstrap/**"
+      - "vagrant/**"
+      - "argocd/application.yaml"
+      - "up.sh"
+  workflow_dispatch:
+
+# два запуска инфраструктуры одновременно не нужны
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+jobs:
+  infra:
+    runs-on: [self-hosted, Linux, X64, craftista-local]
+    timeout-minutes: 120
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      VAGRANT_WIN_DIR: 'D:\vagrant-ubuntu'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false     # не стирать ansible/.venv и ansible/kubespray между запусками
+          fetch-depth: 0   # нужна история, чтобы сравнить изменённые файлы
+
+      - name: Проверка кластера
+        id: check
+        run: |
+          if kubectl --request-timeout=15s get nodes >/dev/null 2>&1; then
+            echo "Кластер отвечает"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Кластера нет или он недоступен"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Создать кластер с нуля
+        if: steps.check.outputs.exists != 'true'
+        run: ./up.sh
+
+      - name: Применить изменившиеся компоненты стека
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            only="traefik argocd app monitoring elk"   # ручной запуск: весь стек
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              before="HEAD~1"
+            fi
+            files="$(git diff --name-only "$before" HEAD || true)"
+            echo "Изменённые файлы:"; echo "$files"
+            only=""
+            grep -q  '^bootstrap/traefik-values'     <<<"$files" && only="$only traefik"
+            grep -q  '^bootstrap/argocd-values'      <<<"$files" && only="$only argocd"
+            grep -q  '^argocd/application'           <<<"$files" && only="$only app"
+            grep -q  '^bootstrap/monitoring-values'  <<<"$files" && only="$only monitoring"
+            grep -qE '^bootstrap/(elk|charts)/'      <<<"$files" && only="$only elk"
+          fi
+          if [ -z "${only// /}" ]; then
+            echo "Изменений в компонентах стека нет, пропускаю"
+          else
+            echo "Применяю:$only"
+            ONLY="$only" ./up.sh stack
+          fi
+
+      - name: Итог
+        if: always()
+        run: |
+          kubectl get nodes || true
+          kubectl get pods -A --no-headers | grep -vE ' (Running|Completed) ' || echo "все поды Running/Completed"

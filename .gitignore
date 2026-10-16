@@ -11,6 +11,7 @@ ansible/inventory/group_vars/k8s_cluster/api-cert.yml
 ansible/inventory/artifacts/
 # Секреты
 .env
+.secrets.env
 *.pem
 *.key
 kubeconfig*

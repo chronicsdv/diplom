@@ -6,6 +6,8 @@
 #   bootstrap/install-stack.sh        (или ./up.sh stack)
 #
 # Переменные окружения:
+#   ONLY                какие компоненты ставить, через пробел: traefik argocd app monitoring elk
+#                       (пусто = все). Пример: ONLY="monitoring elk" ./up.sh stack
 #   TELEGRAM_CHAT_ID    чат для алертов (обязателен для мониторинга; спросит, если не задан)
 #   TELEGRAM_BOT_TOKEN  токен бота (нужен, только пока нет секрета alertmanager-telegram)
 #   SKIP_MONITORING=1   не ставить мониторинг
@@ -18,6 +20,15 @@ TRAEFIK_VALUES="${TRAEFIK_VALUES:-$ROOT/bootstrap/traefik-values.yaml}"
 ARGOCD_VALUES="${ARGOCD_VALUES:-$ROOT/bootstrap/argocd-values.yaml}"
 MONITORING_VALUES="${MONITORING_VALUES:-$ROOT/bootstrap/monitoring-values.yaml}"
 ELK_DIR="$ROOT/bootstrap/elk"
+
+# версии чартов зафиксированы для воспроизводимости
+TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-41.7.1}"
+ARGOCD_CHART_VERSION="${ARGOCD_CHART_VERSION:-10.10.3}"
+MONITORING_CHART_VERSION="${MONITORING_CHART_VERSION:-92.7.0}"
+
+# выбор компонентов: ONLY пусто = всё
+ONLY="${ONLY:-}"
+want() { [ -z "$ONLY" ] || [[ " $ONLY " == *" $1 "* ]]; }
 
 # локальные секреты (файл в git не попадает)
 if [ -f "$ROOT/.secrets.env" ]; then
@@ -35,12 +46,15 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 for cmd in kubectl helm openssl; do
   command -v "$cmd" >/dev/null || die "Не найдена команда: $cmd"
 done
-[ "${SKIP_MONITORING:-0}" = 1 ] || command -v envsubst >/dev/null \
-  || die "Не найден envsubst (sudo apt install gettext-base)"
+if want monitoring && [ "${SKIP_MONITORING:-0}" != 1 ]; then
+  command -v envsubst >/dev/null || die "Не найден envsubst (sudo apt install gettext-base)"
+fi
 kubectl get nodes >/dev/null 2>&1 || die "Кластер недоступен (kubectl get nodes). Сначала ./up.sh kubeconfig"
 [ -f "$TRAEFIK_VALUES" ] || die "Нет $TRAEFIK_VALUES"
 [ -f "$ARGOCD_VALUES" ]  || die "Нет $ARGOCD_VALUES (укажите путь в ARGOCD_VALUES=...)"
 [ -f "$ROOT/argocd/application.yaml" ] || die "Нет argocd/application.yaml"
+
+[ -z "$ONLY" ] || log "Выбранные компоненты: $ONLY"
 
 ensure_ns() { kubectl create namespace "$1" --dry-run=client -o yaml | kubectl apply -f - >/dev/null; }
 
@@ -51,32 +65,38 @@ helm repo add prometheus-community https://prometheus-community.github.io/helm-c
 helm repo update >/dev/null
 
 # ---------- 1. Traefik ----------
-log "Traefik"
-helm upgrade --install traefik traefik/traefik -n traefik --create-namespace \
-  -f "$TRAEFIK_VALUES" --wait --timeout 5m
+if want traefik; then
+  log "Traefik"
+  helm upgrade --install traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" -n traefik --create-namespace \
+    -f "$TRAEFIK_VALUES" --wait --timeout 5m
+fi
 
 # ---------- 2. Argo CD ----------
-log "Argo CD"
-helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace \
-  -f "$ARGOCD_VALUES" --wait --timeout 10m
+if want argocd; then
+  log "Argo CD"
+  helm upgrade --install argocd argo/argo-cd --version "$ARGOCD_CHART_VERSION" -n argocd --create-namespace \
+    -f "$ARGOCD_VALUES" --wait --timeout 10m
+fi
 
 # ---------- 3. Приложение ----------
-log "Приложение Craftista (секрет БД и Argo CD Application)"
-ensure_ns craftista
-if ! kubectl -n craftista get secret craftista-db >/dev/null 2>&1; then
-  DB_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9')"
-  kubectl -n craftista create secret generic craftista-db \
-    --from-literal=DB_NAME=catalogue \
-    --from-literal=DB_USER=devops \
-    --from-literal=DB_PASSWORD="$DB_PASSWORD" >/dev/null
-  echo "  секрет craftista-db создан"
-else
-  echo "  секрет craftista-db уже есть, не трогаю"
+if want app; then
+  log "Приложение Craftista (секрет БД и Argo CD Application)"
+  ensure_ns craftista
+  if ! kubectl -n craftista get secret craftista-db >/dev/null 2>&1; then
+    DB_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9')"
+    kubectl -n craftista create secret generic craftista-db \
+      --from-literal=DB_NAME=catalogue \
+      --from-literal=DB_USER=devops \
+      --from-literal=DB_PASSWORD="$DB_PASSWORD" >/dev/null
+    echo "  секрет craftista-db создан"
+  else
+    echo "  секрет craftista-db уже есть, не трогаю"
+  fi
+  kubectl apply -f "$ROOT/argocd/application.yaml"
 fi
-kubectl apply -f "$ROOT/argocd/application.yaml"
 
 # ---------- 4. Мониторинг ----------
-if [ "${SKIP_MONITORING:-0}" != 1 ]; then
+if want monitoring && [ "${SKIP_MONITORING:-0}" != 1 ]; then
   log "Мониторинг (kube-prometheus-stack)"
   [ -f "$MONITORING_VALUES" ] || die "Нет $MONITORING_VALUES"
   ensure_ns monitoring
@@ -95,11 +115,12 @@ if [ "${SKIP_MONITORING:-0}" != 1 ]; then
   fi
   export TELEGRAM_CHAT_ID
   envsubst < "$MONITORING_VALUES" | helm upgrade --install monitoring \
-    prometheus-community/kube-prometheus-stack -n monitoring -f - --wait --timeout 15m
+    prometheus-community/kube-prometheus-stack --version "$MONITORING_CHART_VERSION" \
+    -n monitoring -f - --wait --timeout 15m
 fi
 
 # ---------- 5. ELK ----------
-if [ "${SKIP_ELK:-0}" != 1 ]; then
+if want elk && [ "${SKIP_ELK:-0}" != 1 ]; then
   log "ELK: ECK-оператор"
   ECK_CHART="$(ls "$ROOT"/bootstrap/charts/eck-operator-*.tgz 2>/dev/null | sort -V | tail -1)"
   [ -n "$ECK_CHART" ] || die "Нет чарта bootstrap/charts/eck-operator-*.tgz"
