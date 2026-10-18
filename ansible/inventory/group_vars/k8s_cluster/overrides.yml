@@ -9,3 +9,4 @@ kubeconfig_localhost: true
 kubectl_localhost: false
 
 
+etcd_metrics_port: 2381
