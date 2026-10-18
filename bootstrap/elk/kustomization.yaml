@@ -6,3 +6,4 @@ resources:
   - logstash.yaml
   - kibana.yaml
   - filebeat.yaml
+  - kibana-ingress.yaml
