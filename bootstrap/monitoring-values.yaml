@@ -1,8 +1,13 @@
 # kube-prometheus-stack: Prometheus + Grafana + Alertmanager + exporters
 
-# Метрики control plane. etcd пока выключен, kube-proxy слушает только localhost.
+# Метрики control plane. etcd отдаёт метрики на отдельном порту 2381 (etcd_metrics_port в overrides.yml).
 kubeEtcd:
-  enabled: false
+  endpoints: [192.168.0.105]
+  service:
+    port: 2381
+    targetPort: 2381
+  serviceMonitor:
+    scheme: http
 kubeProxy:
   enabled: false
 kubeScheduler:

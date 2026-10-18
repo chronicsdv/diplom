@@ -8,3 +8,36 @@ configs:
       hs = {}
       hs.status = "Healthy"
       return hs
+
+notifications:
+  secret:
+    create: false          # токен кладём сами (в git его нет)
+  notifiers:
+    service.telegram: |
+      token: $telegram-token
+  templates:
+    template.app-deployed: |
+      message: |
+        ✅ Деплой {{.app.metadata.name}} завершён
+        Ревизия: {{.app.status.sync.revision | trunc 7}}
+        Sync: {{.app.status.sync.status}}, Health: {{.app.status.health.status}}
+    template.app-sync-failed: |
+      message: |
+        ❌ Деплой {{.app.metadata.name}} не прошёл
+        Ревизия: {{.app.status.sync.revision | trunc 7}}
+        Ошибка: {{.app.status.operationState.message}}
+    template.app-degraded: |
+      message: |
+        ⚠️ {{.app.metadata.name}} в состоянии {{.app.status.health.status}}
+        Ревизия: {{.app.status.sync.revision | trunc 7}}
+  triggers:
+    trigger.on-deployed: |
+      - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+        oncePer: app.status.sync.revision
+        send: [app-deployed]
+    trigger.on-sync-failed: |
+      - when: app.status.operationState.phase in ['Error', 'Failed']
+        send: [app-sync-failed]
+    trigger.on-health-degraded: |
+      - when: app.status.health.status == 'Degraded'
+        send: [app-degraded]

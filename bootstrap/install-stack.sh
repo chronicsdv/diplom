@@ -74,6 +74,16 @@ fi
 # ---------- 2. Argo CD ----------
 if want argocd; then
   log "Argo CD"
+  ensure_ns argocd
+  if ! kubectl -n argocd get secret argocd-notifications-secret >/dev/null 2>&1; then
+    if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
+      [ -t 0 ] || die "Задайте TELEGRAM_BOT_TOKEN (нужен для уведомлений Argo CD)"
+      read -rsp "Токен Telegram-бота: " TELEGRAM_BOT_TOKEN; echo
+    fi
+    kubectl -n argocd create secret generic argocd-notifications-secret \
+      --from-literal=telegram-token="$TELEGRAM_BOT_TOKEN" >/dev/null
+    echo "  секрет argocd-notifications-secret создан"
+  fi
   helm upgrade --install argocd argo/argo-cd --version "$ARGOCD_CHART_VERSION" -n argocd --create-namespace \
     -f "$ARGOCD_VALUES" --wait --timeout 10m
 fi
@@ -93,6 +103,14 @@ if want app; then
     echo "  секрет craftista-db уже есть, не трогаю"
   fi
   kubectl apply -f "$ROOT/argocd/application.yaml"
+  if [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+    for t in on-deployed on-sync-failed on-health-degraded; do
+      kubectl -n argocd annotate application craftista --overwrite \
+        "notifications.argoproj.io/subscribe.${t}.telegram=${TELEGRAM_CHAT_ID}" >/dev/null
+    done
+  else
+    warn "TELEGRAM_CHAT_ID не задан: уведомления Argo CD не подписаны"
+  fi
 fi
 
 # ---------- 4. Мониторинг ----------
