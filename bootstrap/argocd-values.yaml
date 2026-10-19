@@ -19,7 +19,7 @@ notifications:
     template.app-deployed: |
       message: |
         ✅ Деплой {{.app.metadata.name}} завершён
-        Ревизия: {{.app.status.sync.revision | trunc 7}}
+        Ревизия: {{.app.status.operationState.syncResult.revision | trunc 7}}
         Sync: {{.app.status.sync.status}}, Health: {{.app.status.health.status}}
     template.app-sync-failed: |
       message: |
@@ -33,7 +33,7 @@ notifications:
   triggers:
     trigger.on-deployed: |
       - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
-        oncePer: app.status.sync.revision
+        oncePer: app.status.operationState?.syncResult?.revision
         send: [app-deployed]
     trigger.on-sync-failed: |
       - when: app.status.operationState.phase in ['Error', 'Failed']
