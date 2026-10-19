@@ -1,5 +1,5 @@
 # CI: запускается при коммите в ЛЮБУЮ ветку.
-# Этапы: линтеры -> тесты -> сборка образов -> загрузка образов в ghcr.io
+# Этапы: линтеры -> тесты -> сборка и интеграционный тест (весь стек в docker compose) -> загрузка проверенных образов в ghcr.io -> тег в git (CD)
 name: CI
 
 on:
@@ -115,6 +115,75 @@ jobs:
       - name: Сборка и тесты (Maven)
         run: mvn -B -ntp verify
 
+  # ---------- Интеграционный тест: весь стек в docker compose + smoke-test ----------
+  # Собирает образы из исходников текущего коммита (и записывает кэш слоёв), поднимает все
+  # сервисы вместе и проверяет цепочку frontend -> catalogue / recommendation / voting
+  # (см. craftista/smoke-test.sh). Пока тест не пройден, build-and-push не стартует:
+  # в реестр попадают только проверенные образы. Там сборка берёт готовый кэш и занимает секунды.
+  integration:
+    name: Интеграционный тест (docker compose + smoke-test)
+    runs-on: ubuntu-24.04
+    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting]
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: craftista
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверить, что compose-файл и smoke-test на месте
+        run: |
+          test -f docker-compose.yml || { echo "Нет craftista/docker-compose.yml"; exit 1; }
+          test -f smoke-test.sh || { echo "Нет craftista/smoke-test.sh"; exit 1; }
+      - uses: docker/setup-buildx-action@v3
+      # Имена образов и тег dev совпадают с image: в docker-compose.yml (craftista/<сервис>:dev),
+      # поэтому дальше compose берёт их без повторной сборки.
+      - name: Сборка catalogue (кэш слоёв)
+        uses: docker/build-push-action@v6
+        with:
+          context: craftista/catalogue
+          load: true
+          tags: craftista/catalogue:dev
+          cache-from: type=gha,scope=catalogue
+          cache-to: type=gha,scope=catalogue,mode=max
+      - name: Сборка frontend (кэш слоёв)
+        uses: docker/build-push-action@v6
+        with:
+          context: craftista/frontend
+          load: true
+          tags: craftista/frontend:dev
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+      - name: Сборка recommendation (кэш слоёв)
+        uses: docker/build-push-action@v6
+        with:
+          context: craftista/recommendation
+          load: true
+          tags: craftista/recommendation:dev
+          cache-from: type=gha,scope=recommendation
+          cache-to: type=gha,scope=recommendation,mode=max
+      - name: Сборка voting (кэш слоёв)
+        uses: docker/build-push-action@v6
+        with:
+          context: craftista/voting
+          load: true
+          tags: craftista/voting:dev
+          cache-from: type=gha,scope=voting
+          cache-to: type=gha,scope=voting,mode=max
+      - name: Файл .env для теста (пароль только для этого запуска)
+        run: printf 'DB_PASSWORD=ci-test-password\n' > .env
+      - name: Запуск всех сервисов (без повторной сборки)
+        run: docker compose up -d --no-build --wait --wait-timeout 300
+      - name: Smoke-тест
+        run: bash smoke-test.sh
+      - name: Логи сервисов (только при ошибке)
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=200
+      - name: Остановка и очистка
+        if: always()
+        run: docker compose down -v
+
   # ---------- Инфраструктура и манифесты ----------
   helm:
     name: Helm-чарт (lint + template + kubeconform)
@@ -165,7 +234,7 @@ jobs:
   build-and-push:
     name: Образ ${{ matrix.service }} -> ghcr.io
     runs-on: ubuntu-24.04
-    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting]
+    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting, integration]
     permissions:
       contents: read
       packages: write
@@ -201,10 +270,11 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
   # ---------- CD: прописываем новый тег образов в git, дальше работает Argo CD ----------
+  # Ждёт и сборку образов, и интеграционный тест: сломанный стек не деплоим.
   deploy:
     name: Обновление тега образов (GitOps)
     runs-on: ubuntu-24.04
-    needs: [build-and-push]
+    needs: [build-and-push, integration]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -235,7 +305,7 @@ jobs:
   notify:
     name: Уведомление в Telegram
     runs-on: ubuntu-24.04
-    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting, helm, terraform, build-and-push, deploy]
+    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting, integration, helm, terraform, build-and-push, deploy]
     if: always()
     steps:
       - name: Отправить результат
