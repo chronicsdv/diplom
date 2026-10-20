@@ -4,7 +4,7 @@
 #   -> обновление kubeconfig -> проверка кластера -> ссылка на сайт.
 #
 # Запуск из корня репозитория:
-#   ./start.sh
+#   ./start-yandex.sh
 
 set -euo pipefail
 

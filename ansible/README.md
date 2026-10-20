@@ -1,7 +1,7 @@
 # Ansible + Kubespray: установка Kubernetes на ВМ
 
 Файлы:
-- `inventory/hosts.ini` — создаётся Terraform автоматически
+- `inventory/hosts.ini` — статический, адреса ВМ Vagrant (в варианте Yandex его перезаписывает Terraform)
 - `inventory/group_vars/k8s_cluster/api-cert.yml` — тоже от Terraform (IP для сертификата API)
 - `inventory/group_vars/k8s_cluster/overrides.yml`, `addons.yml` — наши настройки Kubespray
 - `prepare.yml` — подготовка нод
@@ -14,7 +14,7 @@ cd ansible
 ./bootstrap-kubespray.sh
 ```
 
-## Установка кластера (после `terraform apply`)
+## Установка кластера (после `vagrant up`)
 ```
 cd ansible
 source .venv/bin/activate
@@ -35,4 +35,4 @@ cp inventory/artifacts/admin.conf ~/.kube/config
 sed -i "s#server: .*#server: https://<IP_CONTROL_PLANE>:6443#" ~/.kube/config
 kubectl get nodes
 ```
-IP берём из `terraform output`.
+IP control plane берём из `inventory/hosts.ini`.

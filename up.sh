@@ -90,7 +90,7 @@ if [ "${SKIP_VMS:-0}" = 1 ]; then
   warn "SKIP_VMS=1: ВМ не трогаю, считаю что они уже запущены"
 else
   log "Vagrant: поднимаю ВМ в Hyper-V ($VAGRANT_WIN_DIR)"
-  ps "cd '$VAGRANT_WIN_DIR'; vagrant up --parallel --provider=hyperv; exit \$LASTEXITCODE" \
+  ps "cd '$VAGRANT_WIN_DIR'; vagrant up --provider=hyperv; exit \$LASTEXITCODE" \
     || die "vagrant up завершился с ошибкой (смотрите вывод выше)"
 fi
 
