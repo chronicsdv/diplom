@@ -9,7 +9,7 @@ kubeEtcd:
   serviceMonitor:
     scheme: http
 kubeProxy:
-  enabled: false
+  enabled: true
 kubeScheduler:
   endpoints: [192.168.0.105]
   service:

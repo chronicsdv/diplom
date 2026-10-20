@@ -10,3 +10,4 @@ kubectl_localhost: false
 
 
 etcd_metrics_port: 2381
+kube_proxy_metrics_bind_address: 0.0.0.0:10249
