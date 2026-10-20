@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Ставит на готовый кластер: Traefik, Argo CD (+ приложение), мониторинг, ELK.
+# Ставит на готовый кластер: Traefik, Argo CD (+ приложение), мониторинг, логи (Loki + Alloy; ELK как запасной вариант).
 # Идемпотентен: helm upgrade --install, существующие секреты не перезаписываются.
 #
 # Запуск из корня репозитория:
 #   bootstrap/install-stack.sh        (или ./up.sh stack)
 #
 # Переменные окружения:
-#   ONLY                какие компоненты ставить, через пробел: traefik argocd app monitoring elk
-#                       (пусто = все). Пример: ONLY="monitoring elk" ./up.sh stack
+#   ONLY                какие компоненты ставить, через пробел: traefik argocd app monitoring loki elk
+#                       (пусто = все). Пример: ONLY="monitoring loki" ./up.sh stack
+#   LOGGING_STACK       loki (по умолчанию) или elk: какой стек логов ставить
 #   TELEGRAM_CHAT_ID    чат для алертов (обязателен для мониторинга; спросит, если не задан)
 #   TELEGRAM_BOT_TOKEN  токен бота (нужен, только пока нет секрета alertmanager-telegram)
 #   SKIP_MONITORING=1   не ставить мониторинг
-#   SKIP_ELK=1          не ставить ELK
+#   SKIP_LOGGING=1      не ставить Loki + Alloy
+#   SKIP_ELK=1          не ставить ELK (при LOGGING_STACK=elk)
+#   LOKI_CHART_VERSION / ALLOY_CHART_VERSION   версии чартов (пусто = последняя; после первой удачной установки закрепите)
 #   TRAEFIK_VALUES / ARGOCD_VALUES / MONITORING_VALUES   пути к values-файлам
 set -euo pipefail
 
@@ -20,6 +23,11 @@ TRAEFIK_VALUES="${TRAEFIK_VALUES:-$ROOT/bootstrap/traefik-values.yaml}"
 ARGOCD_VALUES="${ARGOCD_VALUES:-$ROOT/bootstrap/argocd-values.yaml}"
 MONITORING_VALUES="${MONITORING_VALUES:-$ROOT/bootstrap/monitoring-values.yaml}"
 ELK_DIR="$ROOT/bootstrap/elk"
+LOKI_VALUES="${LOKI_VALUES:-$ROOT/bootstrap/loki-values.yaml}"
+ALLOY_VALUES="${ALLOY_VALUES:-$ROOT/bootstrap/alloy-values.yaml}"
+LOGGING_STACK="${LOGGING_STACK:-loki}"
+LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-19.0.0}"
+ALLOY_CHART_VERSION="${ALLOY_CHART_VERSION:-1.14.0}"
 
 # версии чартов зафиксированы для воспроизводимости
 TRAEFIK_CHART_VERSION="${TRAEFIK_CHART_VERSION:-41.7.1}"
@@ -62,6 +70,7 @@ log "Helm-репозитории"
 helm repo add traefik https://traefik.github.io/charts --force-update >/dev/null
 helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+helm repo add grafana https://grafana.github.io/helm-charts --force-update >/dev/null
 helm repo update >/dev/null
 
 # ---------- 1. Traefik ----------
@@ -137,8 +146,21 @@ if want monitoring && [ "${SKIP_MONITORING:-0}" != 1 ]; then
     -n monitoring -f - --wait --timeout 15m
 fi
 
-# ---------- 5. ELK ----------
-if want elk && [ "${SKIP_ELK:-0}" != 1 ]; then
+# ---------- 5. Логи: Loki + Alloy ----------
+if want loki && [ "$LOGGING_STACK" = loki ] && [ "${SKIP_LOGGING:-0}" != 1 ]; then
+  [ -f "$LOKI_VALUES" ]  || die "Нет $LOKI_VALUES"
+  [ -f "$ALLOY_VALUES" ] || die "Нет $ALLOY_VALUES"
+  log "Loki (хранилище логов)"
+  helm upgrade --install loki grafana-community/loki ${LOKI_CHART_VERSION:+--version "$LOKI_CHART_VERSION"} \
+    -n logging --create-namespace -f "$LOKI_VALUES" --wait --timeout 10m
+  log "Alloy (сбор логов с узлов)"
+  helm upgrade --install alloy grafana/alloy ${ALLOY_CHART_VERSION:+--version "$ALLOY_CHART_VERSION"} \
+    -n logging -f "$ALLOY_VALUES" --wait --timeout 5m
+  helm list -n logging
+fi
+
+# ---------- 6. ELK (запасной вариант: LOGGING_STACK=elk) ----------
+if want elk && [ "$LOGGING_STACK" = elk ] && [ "${SKIP_ELK:-0}" != 1 ]; then
   log "ELK: ECK-оператор"
   ECK_CHART="$(ls "$ROOT"/bootstrap/charts/eck-operator-*.tgz 2>/dev/null | sort -V | tail -1)"
   [ -n "$ECK_CHART" ] || die "Нет чарта bootstrap/charts/eck-operator-*.tgz"
@@ -172,7 +194,7 @@ cat <<'EOF'
 Argo CD:   kubectl -n argocd port-forward svc/argocd-server 8080:443   (https://localhost:8080, admin)
            kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 Grafana:   kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
-Kibana:    kubectl -n logging port-forward svc/kibana-kb-http 5601:5601
-           kubectl -n logging get secret logs-es-elastic-user -o go-template='{{.data.elastic | base64decode}}'; echo
+Логи:      Grafana, Explore, источник Loki, запрос {namespace="craftista"}
+           (вариант ELK: kubectl -n logging port-forward svc/kibana-kb-http 5601:5601)
 Сайт:      http://<IP любого воркера>/
 EOF

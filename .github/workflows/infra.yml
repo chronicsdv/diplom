@@ -55,7 +55,7 @@ jobs:
         if: steps.check.outputs.exists == 'true'
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            only="traefik argocd app monitoring elk"   # ручной запуск: весь стек
+            only="traefik argocd app monitoring loki"   # ручной запуск: весь стек
           else
             before="${{ github.event.before }}"
             if [ -z "$before" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
@@ -68,6 +68,7 @@ jobs:
             grep -q  '^bootstrap/argocd-values'      <<<"$files" && only="$only argocd"
             grep -q  '^argocd/application'           <<<"$files" && only="$only app"
             grep -q  '^bootstrap/monitoring-values'  <<<"$files" && only="$only monitoring"
+            grep -qE '^bootstrap/(loki|alloy)-values' <<<"$files" && only="$only loki"
             grep -qE '^bootstrap/(elk|charts)/'      <<<"$files" && only="$only elk"
           fi
           if [ -z "${only// /}" ]; then

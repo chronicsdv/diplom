@@ -48,6 +48,17 @@ prometheus:
     ruleSelectorNilUsesHelmValues: false
 
 grafana:
+  image:
+    tag: "12.4.13"
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.logging.svc.cluster.local:3100
+  grafana.ini:
+    dashboards:
+      min_refresh_interval: 1m
   readinessProbe:
     timeoutSeconds: 5
     failureThreshold: 6

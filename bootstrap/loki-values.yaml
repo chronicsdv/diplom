@@ -1,0 +1,51 @@
+# Loki: хранилище логов. Режим Monolithic (один под), данные на локальном диске, хранение 3 дня.
+# Легче ELK по памяти и процессору: ориентировочно сотни мегабайт вместо нескольких гигабайт.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: 72h          # логи хранятся 3 дня
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+  pattern_ingester:
+    enabled: false
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+
+# режим одного бинарника: остальные компоненты чарта не нужны
+read: { replicas: 0 }
+write: { replicas: 0 }
+backend: { replicas: 0 }
+
+# выключаем всё лишнее, чтобы не тратить память (кэши memcached по умолчанию требуют гигабайты)
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+gateway: { enabled: false }
+lokiCanary: { enabled: false }
+test: { enabled: false }
+minio: { enabled: false }
+sidecar:
+  rules: { enabled: false }
