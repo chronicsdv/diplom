@@ -1,5 +1,5 @@
 # CI: запускается при коммите в ЛЮБУЮ ветку.
-# Этапы: линтеры -> тесты -> сборка и интеграционный тест (весь стек в docker compose) -> загрузка проверенных образов в ghcr.io -> тег в git (CD)
+# Этапы: линтеры и тесты -> сборка образов (артефакты) -> интеграционный тест -> публикация в ghcr.io -> тег в git (CD)
 name: CI
 
 on:
@@ -114,17 +114,61 @@ jobs:
           cache: maven
       - name: Сборка и тесты (Maven)
         run: mvn -B -ntp verify
+      - name: Артефакт сборки (jar)
+        uses: actions/upload-artifact@v4
+        with:
+          name: voting-jar
+          path: craftista/voting/target/*.jar
+          retention-days: 7
+          if-no-files-found: warn
 
-  # ---------- Интеграционный тест: весь стек в docker compose + smoke-test ----------
-  # Собирает образы из исходников текущего коммита (и записывает кэш слоёв), поднимает все
-  # сервисы вместе и проверяет цепочку frontend -> catalogue / recommendation / voting
-  # (см. craftista/smoke-test.sh). Пока тест не пройден, build-and-push не стартует:
-  # в реестр попадают только проверенные образы. Там сборка берёт готовый кэш и занимает секунды.
-  integration:
-    name: Интеграционный тест (docker compose + smoke-test)
+  # ---------- Сборка образов: результат сборки сохраняется как артефакт ----------
+  # Образ собирается один раз и кладётся в артефакт (image-<сервис>). Дальше именно этот файл
+  # проходит интеграционный тест и именно он публикуется в реестр.
+  build:
+    name: Сборка образа ${{ matrix.service }}
     runs-on: ubuntu-24.04
     needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting]
-    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [catalogue, frontend, recommendation, voting]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Метки образа
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/craftista-${{ matrix.service }}
+      - name: Сборка образа в файл
+        uses: docker/build-push-action@v6
+        with:
+          context: craftista/${{ matrix.service }}
+          push: false
+          # имя и тег как в craftista/docker-compose.yml: craftista/<сервис>:dev
+          tags: craftista/${{ matrix.service }}:dev
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=docker,dest=/tmp/image-${{ matrix.service }}.tar
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+      - name: Артефакт сборки (образ)
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp/image-${{ matrix.service }}.tar
+          retention-days: 1
+          if-no-files-found: error
+
+  # ---------- Интеграционный тест собранных образов (из артефактов) ----------
+  # Берёт образы из артефактов сборки, поднимает все сервисы вместе через docker compose
+  # и проверяет цепочку frontend -> catalogue / recommendation / voting (craftista/smoke-test.sh).
+  # Отчёт теста сохраняется как артефакт integration-report.
+  integration:
+    name: Интеграционный тест (образы из артефактов + smoke-test)
+    runs-on: ubuntu-24.04
+    needs: [build]
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: craftista
@@ -134,52 +178,40 @@ jobs:
         run: |
           test -f docker-compose.yml || { echo "Нет craftista/docker-compose.yml"; exit 1; }
           test -f smoke-test.sh || { echo "Нет craftista/smoke-test.sh"; exit 1; }
-      - uses: docker/setup-buildx-action@v3
-      # Имена образов и тег dev совпадают с image: в docker-compose.yml (craftista/<сервис>:dev),
-      # поэтому дальше compose берёт их без повторной сборки.
-      - name: Сборка catalogue (кэш слоёв)
-        uses: docker/build-push-action@v6
+      - name: Скачать образы из артефактов сборки
+        uses: actions/download-artifact@v4
         with:
-          context: craftista/catalogue
-          load: true
-          tags: craftista/catalogue:dev
-          cache-from: type=gha,scope=catalogue
-          cache-to: type=gha,scope=catalogue,mode=max
-      - name: Сборка frontend (кэш слоёв)
-        uses: docker/build-push-action@v6
-        with:
-          context: craftista/frontend
-          load: true
-          tags: craftista/frontend:dev
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,scope=frontend,mode=max
-      - name: Сборка recommendation (кэш слоёв)
-        uses: docker/build-push-action@v6
-        with:
-          context: craftista/recommendation
-          load: true
-          tags: craftista/recommendation:dev
-          cache-from: type=gha,scope=recommendation
-          cache-to: type=gha,scope=recommendation,mode=max
-      - name: Сборка voting (кэш слоёв)
-        uses: docker/build-push-action@v6
-        with:
-          context: craftista/voting
-          load: true
-          tags: craftista/voting:dev
-          cache-from: type=gha,scope=voting
-          cache-to: type=gha,scope=voting,mode=max
+          pattern: image-*
+          path: /tmp/images
+          merge-multiple: true
+      - name: Загрузить образы в Docker
+        run: |
+          for f in /tmp/images/image-*.tar; do docker load -i "$f"; done
+          docker images 'craftista/*'
       - name: Файл .env для теста (пароль только для этого запуска)
         run: printf 'DB_PASSWORD=ci-test-password\n' > .env
-      - name: Запуск всех сервисов (без повторной сборки)
+      - name: Запуск всех сервисов (без сборки)
         run: docker compose up -d --no-build --wait --wait-timeout 300
       - name: Smoke-тест
-        run: bash smoke-test.sh
-      - name: Логи сервисов (только при ошибке)
-        if: failure()
         run: |
-          docker compose ps -a
-          docker compose logs --no-color --tail=200
+          set -o pipefail
+          bash smoke-test.sh 2>&1 | tee smoke-test.log
+      - name: Отчёт (статус и логи контейнеров)
+        if: always()
+        run: |
+          docker compose ps -a > compose-ps.txt 2>&1 || true
+          docker compose logs --no-color > compose-logs.txt 2>&1 || true
+      - name: Артефакт отчёта интеграционного теста
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-report
+          path: |
+            craftista/smoke-test.log
+            craftista/compose-ps.txt
+            craftista/compose-logs.txt
+          retention-days: 7
+          if-no-files-found: warn
       - name: Остановка и очистка
         if: always()
         run: docker compose down -v
@@ -230,11 +262,12 @@ jobs:
       - name: Validate
         run: terraform validate
 
-  # ---------- Сборка и загрузка образов ----------
-  build-and-push:
-    name: Образ ${{ matrix.service }} -> ghcr.io
+  # ---------- Публикация образов, прошедших интеграционный тест ----------
+  # Образы берутся из артефактов сборки (те же байты, что проходили тест) и пушатся в ghcr.io.
+  publish:
+    name: Публикация образа ${{ matrix.service }} -> ghcr.io
     runs-on: ubuntu-24.04
-    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting, integration]
+    needs: [integration]
     permissions:
       contents: read
       packages: write
@@ -243,14 +276,7 @@ jobs:
       matrix:
         service: [catalogue, frontend, recommendation, voting]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Теги и метки образа
+      - name: Теги образа
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -259,22 +285,35 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
-      - name: Сборка и push
-        uses: docker/build-push-action@v6
+      - name: Скачать образ из артефакта сборки
+        uses: actions/download-artifact@v4
         with:
-          context: craftista/${{ matrix.service }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          name: image-${{ matrix.service }}
+          path: /tmp/image
+      - name: Загрузить образ в Docker
+        run: docker load -i /tmp/image/image-${{ matrix.service }}.tar
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Теги и push (тот же образ, что прошёл тест)
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          while read -r t; do
+            [ -n "$t" ] || continue
+            docker tag "craftista/${SERVICE}:dev" "$t"
+            docker push "$t"
+          done <<< "$TAGS"
 
   # ---------- CD: прописываем новый тег образов в git, дальше работает Argo CD ----------
-  # Ждёт и сборку образов, и интеграционный тест: сломанный стек не деплоим.
+  # Ждёт публикацию образов, а она идёт только после успешного интеграционного теста.
   deploy:
     name: Обновление тега образов (GitOps)
     runs-on: ubuntu-24.04
-    needs: [build-and-push, integration]
+    needs: [publish]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -305,7 +344,7 @@ jobs:
   notify:
     name: Уведомление в Telegram
     runs-on: ubuntu-24.04
-    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting, integration, helm, terraform, build-and-push, deploy]
+    needs: [lint-dockerfiles, catalogue, frontend, recommendation, voting, build, integration, publish, helm, terraform, deploy]
     if: always()
     steps:
       - name: Отправить результат
