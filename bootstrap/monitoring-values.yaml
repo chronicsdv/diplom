@@ -48,6 +48,9 @@ prometheus:
     ruleSelectorNilUsesHelmValues: false
 
 grafana:
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
   defaultDashboardsTimezone: browser
   resources:
     requests: { cpu: 100m, memory: 256Mi }
