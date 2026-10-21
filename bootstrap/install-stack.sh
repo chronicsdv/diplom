@@ -144,6 +144,11 @@ if want monitoring && [ "${SKIP_MONITORING:-0}" != 1 ]; then
   envsubst < "$MONITORING_VALUES" | helm upgrade --install monitoring \
     prometheus-community/kube-prometheus-stack --version "$MONITORING_CHART_VERSION" \
     -n monitoring -f - --wait --timeout 15m
+  log "Blackbox exporter"
+  helm upgrade --install blackbox-exporter prometheus-community/prometheus-blackbox-exporter \
+    ${BLACKBOX_CHART_VERSION:+--version "$BLACKBOX_CHART_VERSION"} \
+    -n monitoring -f "$ROOT/bootstrap/blackbox-values.yaml" --wait --timeout 5m
+  kubectl apply --server-side -k "$ROOT/bootstrap/monitoring"
 fi
 
 # ---------- 5. Логи: Loki + Alloy ----------

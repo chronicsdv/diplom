@@ -1,0 +1,213 @@
+# Алерты Craftista для kube-prometheus-stack (PrometheusRule).
+# Prometheus подхватывает правило сам (ruleSelectorNilUsesHelmValues: false в monitoring-values.yaml).
+# Стандартные алерты стека (KubePodCrashLooping, KubeNodeNotReady, NodeFilesystemSpaceFillingUp, TargetDown, Watchdog ...)
+# остаются как есть, здесь только то, что специфично для нашего проекта.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: craftista-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: craftista
+    release: monitoring
+spec:
+  groups:
+    # ---------------- Приложение ----------------
+    - name: craftista-app
+      rules:
+        - alert: CraftistaServiceDown
+          expr: |
+            (kube_deployment_status_replicas_available{namespace="craftista"} == 0)
+            and on (namespace, deployment)
+            (kube_deployment_spec_replicas{namespace="craftista"} > 0)
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Сервис {{ $labels.deployment }} недоступен"
+            description: "У Deployment {{ $labels.deployment }} (namespace craftista) 0 доступных реплик более 2 минут."
+
+        - alert: CraftistaDeploymentDegraded
+          expr: |
+            kube_deployment_status_replicas_available{namespace="craftista"}
+              < on (namespace, deployment)
+            kube_deployment_spec_replicas{namespace="craftista"}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.deployment }}: доступны не все реплики"
+            description: "Доступно {{ $value }} реплик, желаемое число больше. Деплой завис или Pod'ы падают."
+
+        - alert: CraftistaDatabaseDown
+          expr: kube_statefulset_status_replicas_ready{namespace="craftista",statefulset="catalogue-db"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "PostgreSQL (catalogue-db) не работает"
+            description: "StatefulSet catalogue-db без готовых реплик более 2 минут. Каталог товаров недоступен."
+
+        - alert: CraftistaContainerRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="craftista"}[30m]) >= 3
+          for: 1m
+          labels: { severity: warning }
+          annotations:
+            summary: "Контейнер {{ $labels.pod }}/{{ $labels.container }} часто перезапускается"
+            description: "{{ printf \"%.0f\" $value }} перезапусков за 30 минут."
+
+        - alert: CraftistaContainerOOMKilled
+          expr: |
+            (kube_pod_container_status_last_terminated_reason{namespace="craftista",reason="OOMKilled"} == 1)
+            and on (namespace, pod, container)
+            (increase(kube_pod_container_status_restarts_total{namespace="craftista"}[10m]) > 0)
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.pod }}/{{ $labels.container }} убит по памяти (OOMKilled)"
+            description: "Контейнер перезапущен из-за превышения limits.memory. Увеличьте лимит в helm/craftista/values.yaml."
+
+        - alert: CraftistaMemoryNearLimit
+          expr: |
+            max by (namespace, pod, container) (container_memory_working_set_bytes{namespace="craftista",container!="",container!="POD"})
+              / on (namespace, pod, container)
+            max by (namespace, pod, container) (kube_pod_container_resource_limits{namespace="craftista",resource="memory"})
+            > 0.9
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.pod }}/{{ $labels.container }}: память больше 90% от limit"
+            description: "Использование {{ $value | humanizePercentage }} от limits.memory. Скоро OOMKilled."
+
+        - alert: CraftistaEndpointDown
+          expr: probe_success{probe_group="craftista"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Сервис {{ $labels.service }} не отвечает на HTTP-проверку"
+            description: "Проверка {{ $labels.instance }} (blackbox exporter, изнутри кластера) неуспешна более 2 минут."
+
+        - alert: CraftistaEndpointSlow
+          expr: probe_duration_seconds{probe_group="craftista"} > 1
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Сервис {{ $labels.service }} медленно отвечает"
+            description: "Время ответа {{ $value | humanizeDuration }} дольше 10 минут (проверка {{ $labels.instance }})."
+
+        - alert: CraftistaProbesNoData
+          expr: absent(probe_success{probe_group="craftista"})
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Нет данных от blackbox-проверок"
+            description: "Метрик probe_success нет более 10 минут: blackbox exporter не работает или Probe не подхвачены Prometheus."
+
+    # ---------------- Инфраструктура ----------------
+    - name: craftista-infra
+      rules:
+        - alert: NodeMemoryHigh
+          expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+          for: 15m
+          labels: { severity: warning, family: node-memory }
+          annotations:
+            summary: "Нода {{ $labels.instance }}: занято {{ printf \"%.0f\" $value }}% памяти"
+            description: "Доступной памяти мало более 15 минут. Риск OOM и вытеснения Pod'ов."
+
+        - alert: NodeMemoryCritical
+          expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 96
+          for: 5m
+          labels: { severity: critical, family: node-memory }
+          annotations:
+            summary: "Нода {{ $labels.instance }}: памяти почти нет ({{ printf \"%.0f\" $value }}%)"
+            description: "Ядро скоро начнёт убивать процессы. Проверьте, какие Pod'ы потребляют память."
+
+        - alert: NodeCPUHigh
+          expr: 100 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 90
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Нода {{ $labels.instance }}: CPU {{ printf \"%.0f\" $value }}%"
+            description: "Высокая загрузка процессора более 15 минут."
+
+        - alert: NodeDiskUsageHigh
+          expr: |
+            (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+               / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) * 100 > 85
+          for: 10m
+          labels: { severity: warning, family: node-disk }
+          annotations:
+            summary: "Нода {{ $labels.instance }}: диск / заполнен на {{ printf \"%.0f\" $value }}%"
+            description: "Образы, логи или данные Prometheus/Elasticsearch заполняют диск. Почистите: crictl rmi --prune, journalctl --vacuum-size."
+
+        - alert: NodeDiskUsageCritical
+          expr: |
+            (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+               / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) * 100 > 93
+          for: 5m
+          labels: { severity: critical, family: node-disk }
+          annotations:
+            summary: "Нода {{ $labels.instance }}: диск / заполнен на {{ printf \"%.0f\" $value }}%"
+            description: "kubelet начнёт вытеснять Pod'ы (disk pressure). Освободите место срочно."
+
+        - alert: NodeDiskWillFillIn24h
+          expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}[6h], 24 * 3600) < 0
+          for: 1h
+          labels: { severity: warning, family: node-disk }
+          annotations:
+            summary: "Нода {{ $labels.instance }}: диск / закончится в ближайшие 24 часа"
+            description: "По тренду последних 6 часов свободное место уйдёт в ноль меньше чем за сутки."
+
+        - alert: PrometheusStorageNearRetentionSize
+          expr: prometheus_tsdb_storage_blocks_bytes > 2.7e9
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Хранилище Prometheus близко к retentionSize (3GB)"
+            description: "Размер TSDB {{ $value | humanize1024 }}B. Prometheus начнёт удалять старые данные. Значение 2.7e9 привязано к retentionSize: 3GB в monitoring-values.yaml."
+
+        - alert: AlertmanagerNotificationsFailing
+          expr: sum by (integration) (rate(alertmanager_notifications_failed_total[10m])) > 0
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Alertmanager не может отправить уведомления ({{ $labels.integration }})"
+            description: "Ошибки отправки в {{ $labels.integration }} более 10 минут (например, таймауты до api.telegram.org). Алерты могут не доходить."
+
+     # ---------------- Логирование (Loki + Alloy) ----------------
+    - name: craftista-logging
+      rules:
+        - alert: LokiDown
+          expr: kube_statefulset_status_replicas_ready{namespace="logging",statefulset=~"loki.*"} == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Loki недоступен"
+            description: "StatefulSet {{ $labels.statefulset }} без готовых реплик. Логи не принимаются и не читаются в Grafana."
+
+        - alert: LoggingPodNotReady
+          expr: kube_pod_status_ready{namespace="logging",condition="false"} == 1
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Pod {{ $labels.pod }} в namespace logging не Ready"
+            description: "Компонент логирования (Loki или Alloy) не готов более 10 минут."
+
+        - alert: AlloyNotOnAllNodes
+          expr: |
+            kube_daemonset_status_number_ready{namespace="logging",daemonset=~"alloy.*"}
+              < on (namespace, daemonset)
+            kube_daemonset_status_desired_number_scheduled{namespace="logging",daemonset=~"alloy.*"}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Alloy работает не на всех нодах"
+            description: "Логи с части нод не собираются."
+
+        - alert: LokiMemoryNearLimit
+          expr: |
+            max by (pod, container) (container_memory_working_set_bytes{namespace="logging",pod=~"loki-[0-9]+",container="loki"})
+              / on (pod, container)
+            max by (pod, container) (kube_pod_container_resource_limits{namespace="logging",pod=~"loki-[0-9]+",container="loki",resource="memory"})
+            > 0.9
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Loki: память больше 90% от limit"
+            description: "Риск OOMKilled. Увеличьте limits в bootstrap/loki-values.yaml (singleBinary.resources)."

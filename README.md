@@ -10,7 +10,7 @@
 | Запуск «с нуля одной командой» | `./up.sh` или workflow `infra` в GitHub Actions |
 | CI | GitHub Actions: линтеры, тесты, сборка образов (артефакты), интеграционный тест, публикация в GHCR |
 | CD (GitOps) | CI прописывает тег образа в git (только `main`), Argo CD синхронизирует кластер |
-| Мониторинг | kube-prometheus-stack: Prometheus, Grafana, Alertmanager |
+| Мониторинг | kube-prometheus-stack (Prometheus, Grafana, Alertmanager), дашборды Craftista, собственные алерты, blackbox exporter (HTTP-проверки сервисов) |
 | Логирование | Grafana Alloy собирает логи, Loki хранит их, просмотр в Grafana (Explore) |
 | Оповещения | Telegram: алерты Alertmanager, результат CI, результат деплоя Argo CD |
 
@@ -63,6 +63,7 @@ flowchart LR
 | Traefik (Ingress) | чарт 41.7.1 | Helm |
 | Argo CD | чарт 10.10.3 | Helm |
 | kube-prometheus-stack | чарт 92.7.0 | Helm |
+| Blackbox exporter (проверки доступности) | чарт 11.20.0 | Helm, ставится вместе с мониторингом |
 | Loki (хранилище логов) | чарт 19.0.0 (репозиторий `grafana-community`) | Helm |
 | Grafana Alloy (сбор логов) | чарт 1.14.0 | Helm, DaemonSet на воркерах |
 | Приложение Craftista | тег `sha-<коммит>` | Helm-чарт `helm/craftista`, ставит Argo CD |
@@ -82,6 +83,8 @@ ansible/                 подготовка узлов и установка K
   inventory/group_vars/k8s_cluster/overrides.yml   настройки Kubespray (Calico, порт метрик etcd)
   inventory/group_vars/k8s_cluster/addons.yml      аддоны Kubespray: Helm, metrics-server, local-path-provisioner
 bootstrap/               установка стека на готовый кластер
+  blackbox-values.yaml     значения чарта blackbox exporter
+  monitoring/              дашборды Grafana, правила алертов, HTTP-пробы (kustomize)
   install-stack.sh         Traefik, Argo CD, приложение, мониторинг, Loki и Alloy
   traefik-values.yaml, argocd-values.yaml, monitoring-values.yaml   значения Helm-чартов
   loki-values.yaml, alloy-values.yaml   значения чартов Loki и Alloy
@@ -238,11 +241,14 @@ kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 909
 
 ## Мониторинг и оповещения
 
-- **kube-prometheus-stack**: Prometheus (хранение 3 дня, но не более 3 ГБ), Grafana со стандартными дашбордами, Alertmanager, node-exporter, kube-state-metrics.
-- **Метрики control plane:** etcd (отдельный порт метрик 2381, настраивается переменной `etcd_metrics_port` в `overrides.yml`), kube-scheduler и kube-controller-manager. Цели видны в Prometheus: Status, Targets.
-- **Grafana:** минимальный интервал обновления дашбордов 1 минута (`grafana.ini.dashboards.min_refresh_interval` в `monitoring-values.yaml`), чтобы частое автообновление не перегружало сервер.
-- **Оповещения:** Alertmanager отправляет алерты в Telegram. Токен бота хранится в секрете `alertmanager-telegram`, chat_id подставляется при установке через `envsubst`.
-- **Деплой:** Argo CD Notifications присылает результат выкатки в Telegram.
+## Мониторинг и оповещения
+
+- **Сбор метрик:** `kube-prometheus-stack` включает Prometheus, Grafana, Alertmanager, node-exporter и kube-state-metrics. Метрики хранятся до 3 дней с ограничением объёма в 3 ГБ.
+- **Control plane:** собираются метрики etcd (порт `2381`, задаётся через `etcd_metrics_port` в `overrides.yml`), kube-scheduler и kube-controller-manager. Состояние целей сбора доступно в Prometheus: `Status → Targets`.
+- **Grafana:** минимальный интервал обновления дашбордов — 1 минута (`grafana.ini.dashboards.min_refresh_interval` в `monitoring-values.yaml`), чтобы избежать лишней нагрузки. Дашборды автоматически загружаются из `bootstrap/monitoring/dashboards/` через ConfigMap со специальной меткой: **Craftista / Приложение** (реплики, рестарты, `OOMKilled`, CPU, память, сеть и доступность; переменная `Namespace`) и **Craftista / Кластер и ноды**.
+- **Алерты:** 21 правило `PrometheusRule` в `bootstrap/monitoring/rules/craftista-alerts.yaml` контролирует приложение и БД, ресурсы нод (память, CPU и диск), Prometheus, Alertmanager и логирование (Loki, Alloy). Повторные уведомления отправляются раз в час для `critical` и раз в 4 часа для `warning`; `critical` подавляет соответствующий `warning` для той же ноды.
+- **Проверка доступности:** Blackbox exporter выполняет HTTP-пробы изнутри кластера каждые 30 секунд, проверяя frontend, цепочку frontend → catalogue → PostgreSQL, а также catalogue, recommendation и voting. При недоступности или медленном ответе срабатывают алерты `CraftistaEndpointDown` и `CraftistaEndpointSlow`.
+- **Уведомления в Telegram:** Alertmanager отправляет сообщения об алертах. Токен бота хранится в секрете `alertmanager-telegram`, а `chat_id` подставляется при установке через `envsubst`. Argo CD Notifications отдельно уведомляет о результате деплоя.
 
 ## Логирование
 
@@ -286,7 +292,7 @@ cd craftista && docker compose up -d --build && ./smoke-test.sh   # локаль
 - Порт метрик etcd (2381) открыт на IP узла без TLS: для продакшена его закрывают фаерволом так, чтобы он был доступен только узлам кластера.
 - Один control plane и один под Loki: отказоустойчивости нет.
 - Alloy хранит позиции чтения в `/tmp`: после перезапуска пода логи за время простоя теряются.
-- Наблюдались периодические всплески чтения диска хоста; помогал перезапуск Alloy (`kubectl -n logging rollout restart ds/alloy`), причина окончательно не установлена.
+- Alloy требует достаточного лимита памяти (512 MiB): при 192 MiB наблюдалась постоянная высокая нагрузка на чтение диска хоста из-за повторной загрузки страниц файлового кэша. Причина установлена по косвенным признакам.
 - Тег образа CD коммитит в тот же репозиторий и ту же ветку, поэтому перед пушем нужен `git pull --rebase`. В продакшене манифесты и теги обычно выносят в отдельный GitOps-репозиторий.
 - Компоненты стека (Traefik, мониторинг, Loki) ставятся скриптом, а не через Argo CD. Приложение деплоится через Argo CD.
 

@@ -1,0 +1,117 @@
+# HTTP-проверки сервисов Craftista (Probe для prometheus-operator, проверяет blackbox exporter изнутри кластера).
+# Метка release: monitoring нужна, чтобы Prometheus из kube-prometheus-stack подхватил Probe.
+---
+# главная страница frontend
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: craftista-frontend
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app.kubernetes.io/part-of: craftista
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        - http://frontend.craftista.svc:3000/
+      labels:
+        probe_group: craftista
+        service: frontend
+---
+# цепочка frontend -> catalogue -> PostgreSQL
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: craftista-products-chain
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app.kubernetes.io/part-of: craftista
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        - http://frontend.craftista.svc:3000/api/products
+      labels:
+        probe_group: craftista
+        service: products-chain
+---
+# catalogue напрямую
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: craftista-catalogue
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app.kubernetes.io/part-of: craftista
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        - http://catalogue.craftista.svc:5000/api/products
+      labels:
+        probe_group: craftista
+        service: catalogue
+---
+# recommendation (Service называется recco)
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: craftista-recommendation
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app.kubernetes.io/part-of: craftista
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        - http://recco.craftista.svc:8080/api/recommendation-status
+      labels:
+        probe_group: craftista
+        service: recommendation
+---
+# voting
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: craftista-voting
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app.kubernetes.io/part-of: craftista
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      static:
+        - http://voting.craftista.svc:8080/api/origamis
+      labels:
+        probe_group: craftista
+        service: voting

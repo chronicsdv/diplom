@@ -86,12 +86,20 @@ alertmanager:
       receiver: telegram
       group_by: [alertname, namespace]
       group_wait: 30s
-      group_interval: 5m
+      group_interval: 2m
       repeat_interval: 4h
       routes:
         - receiver: "null"
           matchers:
             - alertname = "Watchdog"
+        - receiver: telegram
+          matchers:
+            - severity = "critical"
+          repeat_interval: 1h
+    inhibit_rules:
+      - source_matchers: [severity = "critical", family =~ ".+"]
+        target_matchers: [severity = "warning", family =~ ".+"]
+        equal: [family, instance]
     receivers:
       - name: "null"
       - name: telegram
@@ -99,3 +107,8 @@ alertmanager:
           - bot_token_file: /etc/alertmanager/secrets/alertmanager-telegram/token
             chat_id: ${TELEGRAM_CHAT_ID}
             send_resolved: true
+            parse_mode: HTML
+            message: |-
+              {{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} <b>[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}</b> ({{ .CommonLabels.severity }})
+              {{ range .Alerts }}• {{ .Annotations.summary }}
+              {{ end }}

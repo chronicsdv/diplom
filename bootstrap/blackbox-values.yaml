@@ -1,0 +1,9 @@
+# Blackbox exporter: проверяет HTTP-доступность сервисов Craftista (сами проверки описаны в monitoring/probes/).
+# Чарт: prometheus-community/prometheus-blackbox-exporter
+# fullnameOverride даёт Service blackbox-exporter:9115 (на него ссылаются Probe).
+fullnameOverride: blackbox-exporter
+replicas: 1
+resources:
+  requests: { cpu: 10m, memory: 16Mi }
+  limits: { memory: 64Mi }
+# модуль http_2xx (успех = HTTP 2xx, таймаут 5 с) есть в конфигурации чарта по умолчанию
