@@ -3,7 +3,7 @@
 
 global:
   # Тег образов по умолчанию для всех сервисов. CI/CD подставляет сюда sha-<коммит>.
-  imageTag: sha-af3eea0
+  imageTag: sha-53284e7
 
 # Если образы приватные: список секретов для скачивания, например [{name: ghcr-pull}]
 imagePullSecrets: []
