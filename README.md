@@ -17,30 +17,50 @@
 ## Архитектура
 
 ```mermaid
-flowchart LR
-    dev["Разработчик"] -->|push| gh["GitHub: репозиторий"]
-    gh --> ci["GitHub Actions: CI"]
-    ci -->|образы| ghcr["GHCR"]
-    ci -->|"тег образа в helm/craftista/values.yaml (main)"| gh
-    gh -->|"следит за git"| argo["Argo CD"]
-    ghcr -->|"pull образов"| k8s
+flowchart TB
+    dev["Разработчик"] -->|git push| gh["GitHub: репозиторий"]
 
-    subgraph win["Windows-хост: Hyper-V (Vagrant)"]
-        subgraph k8s["Kubernetes (Kubespray)"]
-            cp["craftista-cp: control plane + etcd"]
-            w1["craftista-w1"]
-            w2["craftista-w2"]
-            w3["craftista-w3"]
-        end
+    subgraph cicd["CI/CD: GitHub Actions"]
+        ci["CI: линтеры и тесты, сборка образов, интеграционный тест"]
+        ci -->|"образы sha-коммит"| ghcr["GHCR: реестр образов"]
+    end
+    gh --> ci
+    ci -->|"только main: тег образа в helm/craftista/values.yaml"| gh
+
+    subgraph infra["Создание инфраструктуры: ./up.sh или workflow infra"]
+        vm["Vagrant: 4 ВМ в Hyper-V"] --> kube["Ansible + Kubespray: Kubernetes"] --> helm["Helm: Traefik, Argo CD, мониторинг, Loki, Alloy"]
     end
 
-    argo -->|деплой| app["Приложение: frontend, catalogue, recommendation, voting"]
-    app --- k8s
-    prom["Prometheus + Grafana + Alertmanager"] --- k8s
-    logs["Alloy -> Loki -> Grafana Explore"] --- k8s
-    prom -->|алерты| tg["Telegram"]
-    argo -->|результат деплоя| tg
-    ci -->|результат CI| tg
+    subgraph k8s["Kubernetes-кластер: control plane + 3 воркера"]
+        traefik["Traefik: Ingress"]
+        argo["Argo CD"]
+        subgraph app["namespace craftista"]
+            fe["frontend"] --> cat["catalogue"] --> db[("PostgreSQL")]
+            fe --> rec["recommendation"]
+            fe --> vote["voting"]
+        end
+        subgraph mon["namespace monitoring"]
+            ne["node-exporter, kube-state-metrics"] --> prom["Prometheus"]
+            prom --> graf["Grafana"]
+            prom --> am["Alertmanager"]
+            bb["Blackbox exporter"]
+        end
+        subgraph logs["namespace logging"]
+            alloy["Alloy: сбор логов"] --> loki["Loki"]
+        end
+        traefik --> fe
+    end
+
+    helm -->|"ставит"| k8s
+    gh -->|"Argo CD следит за git"| argo
+    argo -->|"деплой"| app
+    ghcr -->|"pull образов"| app
+    bb -->|"HTTP-проверки"| app
+    bb -.->|"probe_success"| prom
+    loki --> graf
+    am -->|"алерты"| tg["Telegram"]
+    argo -->|"результат деплоя"| tg
+    ci -->|"результат CI"| tg
 ```
 
 ### Кластер
@@ -143,7 +163,7 @@ cd ~/diplom2
 ./up.sh
 ```
 
-Полный цикл занимает 30-40 минут:
+Полный цикл занимает около 30 минут:
 
 1. `vagrant up` на Windows создаёт 4 ВМ (через `powershell.exe`).
 2. Ansible ждёт SSH на всех узлах и выполняет `prepare.yml`.
@@ -219,7 +239,7 @@ flowchart LR
 
 | Сервис | Адрес | Логин |
 |---|---|---|
-| Приложение Craftista | http://192.168.0.103/ | не требуется |
+| Приложение Craftista | http://craftista.craftista.local | не требуется |
 | Grafana (метрики и логи) | http://grafana.craftista.local | `admin` |
 | Argo CD | `kubectl -n argocd port-forward svc/argocd-server 8080:443`, затем https://localhost:8080 | `admin` |
 
@@ -238,8 +258,6 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
 kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
 ```
-
-## Мониторинг и оповещения
 
 ## Мониторинг и оповещения
 

@@ -78,6 +78,6 @@ voting:
 ingress:
   enabled: true
   className: traefik
-  host: ""               # пусто = открывается по IP любого воркера; позже сюда домен
+  host: "craftista.craftista.local"               # пусто = открывается по IP любого воркера; позже сюда домен
   annotations: {}
   tls: []                # пример: [{secretName: craftista-tls, hosts: [craftista.example.com]}]
